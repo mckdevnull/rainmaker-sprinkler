@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rainmaker mockup: home-layout-v2</title><style>body{font-family:-apple-system,system-ui,sans-serif;background:#fafafa;color:#1c1c1e;margin:24px}.subtitle{color:#555}</style></head><body>
+<h2>Photo cards, with A's progress bar and B's weather</h2>
+<p class="subtitle">Left: the home screen. Right: what happens when you tap a zone's photo. Does this read right?</p>
+
+<style>
+  .phones{display:flex;gap:28px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .phone{width:270px;border:10px solid #1c1c1e;border-radius:34px;background:#f4f6f3;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#1c1c1e;position:relative}
+  .scr{padding:14px 12px 16px;min-height:500px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .ttl{font-weight:700;font-size:20px}
+  .dot{font-size:11px;color:#2f7d5b}
+  .wx{display:flex;gap:8px;align-items:center;background:#fff;border-radius:12px;padding:8px 10px;margin:8px 0 10px;font-size:12px}
+  .wx .big{font-size:22px}
+  .wx small{color:#6b7280;display:block;font-size:11px}
+  .ph{border-radius:14px;height:96px;margin-bottom:8px;position:relative;color:#fff;padding:10px;overflow:hidden}
+  .ph b{font-size:15px;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .ph .st{position:absolute;bottom:10px;left:10px;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+  .ph .go{position:absolute;right:10px;bottom:8px;background:rgba(255,255,255,.92);color:#1c1c1e;border-radius:10px;padding:3px 10px;font-size:11px;font-weight:600}
+  .ph .bar{position:absolute;left:0;right:0;bottom:0;height:6px;background:rgba(255,255,255,.35)}
+  .ph .bar i{display:block;height:6px;width:60%;background:#fff}
+  .ph.running{box-shadow:0 0 0 3px #2f7d5b}
+  .ph .pill{position:absolute;top:10px;right:10px;background:#2f7d5b;color:#fff;font-size:10px;font-weight:700;border-radius:8px;padding:2px 7px}
+  .g1{background:linear-gradient(135deg,#6aa84f,#38761d)}.g2{background:linear-gradient(135deg,#93c47d,#45818e)}.g3{background:linear-gradient(135deg,#b6d7a8,#6aa84f)}.g4{background:linear-gradient(135deg,#a2c4c9,#3d85c6)}
+  .dim{filter:brightness(.55)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:16px 16px 22px;box-shadow:0 -6px 20px rgba(0,0,0,.25)}
+  .sheet h4{margin:0 0 2px;font-size:17px}
+  .sheet .sub{font-size:12px;color:#6b7280;margin-bottom:12px}
+  .mins{display:flex;gap:8px;margin-bottom:12px}
+  .m{flex:1;text-align:center;border:1.5px solid #cfd8d2;border-radius:12px;padding:8px 0;font-size:14px;font-weight:600}
+  .m.sel{border-color:#2f7d5b;background:#e6f2ec;color:#2f7d5b}
+  .custom{font-size:12px;color:#2f7d5b;text-align:center;margin-bottom:12px}
+  .start{background:#2f7d5b;color:#fff;text-align:center;border-radius:14px;padding:12px;font-weight:700}
+  .note{font-size:11px;color:#6b7280;text-align:center;margin-top:8px}
+  .lbl{font-weight:700;text-align:center;margin-top:10px;font-size:15px}
+</style>
+
+<div class="phones">
+
+  <div>
+    <div class="phone"><div class="scr">
+      <div class="top"><span class="ttl">Garden</span><span class="dot">● Online</span></div>
+      <div class="wx"><span class="big">☀️</span><div>24° · No rain expected<small>Next watering: Tue 6:00 AM · Rain skip is on</small></div></div>
+      <div class="ph g1 running"><span class="pill">RUNNING</span><b>Front Lawn</b><span class="st">6:12 left of 10 min</span><span class="go">Stop</span><div class="bar"><i></i></div></div>
+      <div class="ph g2"><b>Back Yard</b><span class="st">Last ran yesterday · 15 min</span><span class="go">Run</span></div>
+      <div class="ph g3"><b>Side Garden</b><span class="st">Last ran 2 days ago</span><span class="go">Run</span></div>
+      <div class="ph g4"><b>Drip Beds</b><span class="st">Up next, in 4 min</span><span class="go">Run</span></div>
+    </div></div>
+    <div class="lbl">Home</div>
+  </div>
+
+  <div>
+    <div class="phone"><div class="scr">
+      <div class="dim">
+        <div class="top"><span class="ttl">Garden</span><span class="dot">● Online</span></div>
+        <div class="wx"><span class="big">☀️</span><div>24° · No rain expected<small>Next watering: Tue 6:00 AM</small></div></div>
+        <div class="ph g1"><b>Front Lawn</b></div>
+        <div class="ph g2"><b>Back Yard</b></div>
+      </div>
+      <div class="sheet">
+        <h4>Back Yard</h4>
+        <div class="sub">How long?</div>
+        <div class="mins"><div class="m">5</div><div class="m sel">10</div><div class="m">15</div><div class="m">20</div></div>
+        <div class="custom">Custom time…</div>
+        <div class="start">Start · 10 min</div>
+        <div class="note">Front Lawn is running. Back Yard will start after it finishes.</div>
+      </div>
+    </div></div>
+    <div class="lbl">Tap a zone</div>
+  </div>
+
+</div>
+
+</body></html>

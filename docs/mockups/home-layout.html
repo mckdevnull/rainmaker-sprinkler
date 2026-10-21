@@ -1,0 +1,90 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rainmaker mockup: home-layout</title><style>body{font-family:-apple-system,system-ui,sans-serif;background:#fafafa;color:#1c1c1e;margin:24px}.subtitle{color:#555}</style></head><body>
+<h2>Which home screen feels right?</h2>
+<p class="subtitle">The first thing you see when you open the app. Zone names are placeholders. Click the one you'd want, or tell me what to mix.</p>
+
+<style>
+  .phones{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .phone{width:260px;border:10px solid #1c1c1e;border-radius:34px;background:#f4f6f3;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#1c1c1e;cursor:pointer}
+  .phone.selected{outline:4px solid #2f7d5b;outline-offset:4px}
+  .scr{padding:14px 12px 16px;min-height:470px}
+  .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .ttl{font-weight:700;font-size:20px}
+  .dot{font-size:11px;color:#2f7d5b}
+  .run{background:#2f7d5b;color:#fff;border-radius:14px;padding:10px 12px;margin-bottom:12px}
+  .run small{opacity:.85;display:block;font-size:11px}
+  .run b{font-size:15px}
+  .bar{height:5px;background:rgba(255,255,255,.3);border-radius:3px;margin-top:6px}
+  .bar i{display:block;height:5px;width:60%;background:#fff;border-radius:3px}
+  .stop{float:right;background:#fff;color:#2f7d5b;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;margin-top:-30px}
+  .row{background:#fff;border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  .row b{font-size:14px}
+  .chips{display:flex;gap:6px;margin-top:6px}
+  .chip{border:1px solid #cfd8d2;border-radius:10px;padding:2px 8px;font-size:11px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .tile{background:#fff;border-radius:14px;padding:10px;height:78px;position:relative}
+  .tile b{font-size:13px}
+  .tile .st{font-size:11px;color:#6b7280;position:absolute;bottom:8px}
+  .tile.on{background:#2f7d5b;color:#fff}.tile.on .st{color:#e6f2ec}
+  .ph{border-radius:14px;height:92px;margin-bottom:8px;position:relative;color:#fff;padding:10px;background-size:cover}
+  .ph b{font-size:15px;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+  .ph .st{position:absolute;bottom:8px;left:10px;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+  .ph .go{position:absolute;right:10px;bottom:8px;background:rgba(255,255,255,.9);color:#1c1c1e;border-radius:10px;padding:2px 9px;font-size:11px;font-weight:600}
+  .g1{background:linear-gradient(135deg,#6aa84f,#38761d)}.g2{background:linear-gradient(135deg,#93c47d,#45818e)}.g3{background:linear-gradient(135deg,#b6d7a8,#6aa84f)}.g4{background:linear-gradient(135deg,#a2c4c9,#3d85c6)}
+  .lbl{font-weight:700;text-align:center;margin-top:10px;font-size:15px}
+  .cap{text-align:center;font-size:13px;color:#555;max-width:260px;margin:4px auto 0}
+  .wx{font-size:11px;color:#6b7280;margin-bottom:10px}
+</style>
+
+<div class="phones">
+
+  <div>
+    <div class="phone" data-choice="a" >
+      <div class="scr">
+        <div class="top"><span class="ttl">Garden</span><span class="dot">● Online</span></div>
+        <div class="run"><small>RUNNING NOW</small><b>Front Lawn · 6:12 left</b><div class="bar"><i></i></div><span class="stop">Stop</span></div>
+        <div class="row"><b>Back Yard</b><div class="chips"><span class="chip">5 min</span><span class="chip">10 min</span><span class="chip">20 min</span><span class="chip">…</span></div></div>
+        <div class="row"><b>Side Garden</b><div class="chips"><span class="chip">5 min</span><span class="chip">10 min</span><span class="chip">20 min</span><span class="chip">…</span></div></div>
+        <div class="row"><b>Drip Beds</b><div class="chips"><span class="chip">5 min</span><span class="chip">10 min</span><span class="chip">20 min</span><span class="chip">…</span></div></div>
+        <div class="row"><b>Hedges</b><div class="chips"><span class="chip">5 min</span><span class="chip">10 min</span><span class="chip">20 min</span><span class="chip">…</span></div></div>
+      </div>
+    </div>
+    <div class="lbl">A · Quick list</div>
+    <div class="cap">Every zone has one-tap run times. Fastest, plainest.</div>
+  </div>
+
+  <div>
+    <div class="phone" data-choice="b" >
+      <div class="scr">
+        <div class="top"><span class="ttl">Garden</span><span class="dot">● Online</span></div>
+        <div class="wx">☀️ 24° · No rain expected · Next: Tue 6:00 AM</div>
+        <div class="grid">
+          <div class="tile on"><b>Front Lawn</b><span class="st">Running · 6:12</span></div>
+          <div class="tile"><b>Back Yard</b><span class="st">Last: yesterday</span></div>
+          <div class="tile"><b>Side Garden</b><span class="st">Last: 2 days</span></div>
+          <div class="tile"><b>Drip Beds</b><span class="st">Last: yesterday</span></div>
+          <div class="tile"><b>Hedges</b><span class="st">Last: 3 days</span></div>
+          <div class="tile"><b>+ Program</b><span class="st">Morning cycle</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="lbl">B · Tile grid</div>
+    <div class="cap">Like the Apple Home app. Tap a tile and a minute picker slides up.</div>
+  </div>
+
+  <div>
+    <div class="phone" data-choice="c" >
+      <div class="scr">
+        <div class="top"><span class="ttl">Garden</span><span class="dot">● Online</span></div>
+        <div class="ph g1"><b>Front Lawn</b><span class="st">Running · 6:12 left</span><span class="go">Stop</span></div>
+        <div class="ph g2"><b>Back Yard</b><span class="st">Last ran yesterday</span><span class="go">Run</span></div>
+        <div class="ph g3"><b>Side Garden</b><span class="st">Last ran 2 days ago</span><span class="go">Run</span></div>
+        <div class="ph g4"><b>Drip Beds</b><span class="st">Last ran yesterday</span><span class="go">Run</span></div>
+      </div>
+    </div>
+    <div class="lbl">C · Photo cards</div>
+    <div class="cap">Each zone shows a photo of that part of the yard, so it's easy to see which is which.</div>
+  </div>
+
+</div>
+
+</body></html>

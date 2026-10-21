@@ -1,0 +1,97 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rainmaker mockup: schedules</title><style>body{font-family:-apple-system,system-ui,sans-serif;background:#fafafa;color:#1c1c1e;margin:24px}.subtitle{color:#555}</style></head><body>
+<h2>Schedules, pausing, and turning the system off</h2>
+<p class="subtitle">Left: the Schedules tab. Middle: editing one schedule. Right: what "Pause" asks you. Names and times are placeholders.</p>
+
+<style>
+  .phones{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .phone{width:262px;border:10px solid #1c1c1e;border-radius:34px;background:#f4f6f3;overflow:hidden;font-family:-apple-system,system-ui,sans-serif;color:#1c1c1e;position:relative}
+  .scr{padding:14px 12px 16px;min-height:540px}
+  .ttl{font-weight:700;font-size:20px;margin-bottom:10px}
+  .card{background:#fff;border-radius:12px;padding:10px 12px;margin-bottom:8px;position:relative}
+  .card b{font-size:14px}
+  .card small{display:block;color:#6b7280;font-size:11px;margin-top:2px}
+  .tog{position:absolute;right:12px;top:12px;width:34px;height:20px;border-radius:10px;background:#2f7d5b}
+  .tog::after{content:"";position:absolute;right:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .tog.off{background:#d1d5db}.tog.off::after{right:auto;left:2px}
+  .sys{background:#1f3b2f;color:#fff}
+  .sys small{color:#cfe3d8}
+  .pz{display:inline-block;margin-top:6px;background:#fff4e0;color:#9a5b00;border-radius:8px;padding:2px 8px;font-size:11px;font-weight:600}
+  .btnrow{display:flex;gap:8px;margin:8px 0 12px}
+  .btn{flex:1;text-align:center;border-radius:12px;padding:9px 0;font-size:12px;font-weight:700}
+  .btn.p{background:#fff4e0;color:#9a5b00}.btn.o{background:#fde8e8;color:#a61b1b}
+  .sec{font-size:11px;color:#6b7280;font-weight:700;letter-spacing:.04em;margin:12px 2px 6px}
+  .days{display:flex;gap:4px}
+  .d{flex:1;text-align:center;border-radius:8px;padding:6px 0;font-size:11px;font-weight:700;background:#e5e7eb;color:#6b7280}
+  .d.on{background:#2f7d5b;color:#fff}
+  .times{display:flex;gap:6px;flex-wrap:wrap}
+  .t{background:#fff;border-radius:10px;padding:6px 10px;font-size:12px;font-weight:600}
+  .t.add{color:#2f7d5b;background:#e6f2ec}
+  .zr{display:flex;justify-content:space-between;background:#fff;border-radius:10px;padding:8px 10px;margin-bottom:5px;font-size:13px}
+  .zr span{color:#2f7d5b;font-weight:600}
+  .dim{filter:brightness(.55)}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:16px 16px 22px;box-shadow:0 -6px 20px rgba(0,0,0,.25)}
+  .sheet h4{margin:0 0 4px;font-size:17px}
+  .sheet .sub{font-size:12px;color:#6b7280;margin-bottom:10px}
+  .opt{border:1.5px solid #e5e7eb;border-radius:12px;padding:9px 12px;font-size:13px;margin-bottom:6px}
+  .opt.sel{border-color:#9a5b00;background:#fff4e0}
+  .go{background:#9a5b00;color:#fff;text-align:center;border-radius:14px;padding:11px;font-weight:700;margin-top:8px}
+  .lbl{font-weight:700;text-align:center;margin-top:10px;font-size:15px}
+</style>
+
+<div class="phones">
+
+  <div>
+    <div class="phone"><div class="scr">
+      <div class="ttl">Schedules</div>
+      <div class="card sys"><b>Rainmaker is on</b><small>Schedules will run as planned</small><div class="tog"></div></div>
+      <div class="btnrow"><div class="btn p">⏸ Pause all…</div><div class="btn o">⏻ Turn system off</div></div>
+      <div class="sec">YOUR SCHEDULES</div>
+      <div class="card"><b>Morning lawns</b><small>Mon · Wed · Fri — 5:30 AM, 7:00 PM<br>Front Lawn, Back Yard</small><div class="tog"></div></div>
+      <div class="card"><b>Garden beds</b><small>Every day — 6:00 AM<br>Drip Beds, Side Garden</small><div class="tog"></div><span class="pz">Paused until Nov 3</span></div>
+      <div class="card"><b>Hedges deep soak</b><small>Sat — 4:00 AM<br>Hedges</small><div class="tog off"></div></div>
+      <div class="card" style="text-align:center;color:#2f7d5b;font-weight:700">+ New schedule</div>
+    </div></div>
+    <div class="lbl">Schedules tab</div>
+  </div>
+
+  <div>
+    <div class="phone"><div class="scr">
+      <div class="ttl">Morning lawns</div>
+      <div class="sec">WHICH DAYS</div>
+      <div class="days"><div class="d on">M</div><div class="d">T</div><div class="d on">W</div><div class="d">T</div><div class="d on">F</div><div class="d">S</div><div class="d">S</div></div>
+      <div class="sec">START TIMES</div>
+      <div class="times"><div class="t">5:30 AM</div><div class="t">7:00 PM</div><div class="t add">+ Add</div></div>
+      <div class="sec">ZONES & HOW LONG (IN ORDER)</div>
+      <div class="zr">Front Lawn <span>12 min</span></div>
+      <div class="zr">Back Yard <span>15 min</span></div>
+      <div class="zr" style="color:#2f7d5b;font-weight:700;justify-content:center">+ Add zone</div>
+      <div class="sec">WEATHER</div>
+      <div class="card"><b>Adjust for weather</b><small>Water less when cool or rainy</small><div class="tog"></div></div>
+    </div></div>
+    <div class="lbl">Edit a schedule</div>
+  </div>
+
+  <div>
+    <div class="phone"><div class="scr">
+      <div class="dim">
+        <div class="ttl">Schedules</div>
+        <div class="card sys"><b>Rainmaker is on</b><small>&nbsp;</small></div>
+        <div class="card"><b>Morning lawns</b><small>&nbsp;</small></div>
+        <div class="card"><b>Garden beds</b><small>&nbsp;</small></div>
+      </div>
+      <div class="sheet">
+        <h4>Pause all watering</h4>
+        <div class="sub">Schedules resume on their own afterwards. You can still water by hand.</div>
+        <div class="opt">Until tomorrow</div>
+        <div class="opt sel">For 3 days — rain is forecast Wed–Thu</div>
+        <div class="opt">For a week</div>
+        <div class="opt">Until a date… (up to ~3 years)</div>
+        <div class="go">Pause until Sat, Oct 24</div>
+      </div>
+    </div></div>
+    <div class="lbl">Pause</div>
+  </div>
+
+</div>
+
+</body></html>
