@@ -1,4 +1,4 @@
 {
   "files": [],
-  "references": [{ "path": "packages/controller-sim" }]
+  "references": [{ "path": "packages/controller-sim" }, { "path": "packages/hub-core" }]
 }
