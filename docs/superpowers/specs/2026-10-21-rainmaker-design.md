@@ -361,4 +361,5 @@ The existing 24 VAC transformer and the field wiring carry over. v2 expansion bo
 ## 13. Open items
 
 - None blocking. The board (v2.2 on 2.1.6(1)) and the Apple TV home hub are both confirmed.
-- **Smart plug:** the owner should choose a plug for automatic power-cycling. On this board it's the main defence against network dropouts (§5.1, §7).
+- **Smart plug:** the owner will put one on the controller for automatic power-cycling. On this board it's the main defence against network dropouts (§5.1, §7). The plug model is still to be chosen.
+- **Custom firmware:** considered and set aside by the owner on 2026-10-21. The board has no free code space, and the plug plus hub watchdog covers dropouts. The only feature a custom build could offer is on-board self-recovery (hardware watchdog plus an Ethernet reset). Revisit only if plug-based recovery proves insufficient.
