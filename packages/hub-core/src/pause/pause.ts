@@ -31,6 +31,8 @@ export class PauseService {
   /** When the delay now on the controller ends, as far as the hub knows; undefined = unknown. */
   private appliedUntil: number | undefined;
   private weather = false;
+  /** A cancelled pause whose record could not be deleted from disk yet. */
+  private clearPending = false;
   private busy = false;
   private loaded: Promise<void> | null = null;
   private chain: Promise<unknown> = Promise.resolve();
@@ -105,7 +107,10 @@ export class PauseService {
       this.appliedUntil = 0;
       this.weather = false;
       this.store.patch({ rainDelayUntil: null });
-      if (!(await this.saveRecord(null))) return { ok: false, error: 'rejected' };
+      if (!(await this.saveRecord(null))) {
+        this.clearPending = true;
+        return { ok: false, error: 'rejected' };
+      }
       return { ok: true, confirmedInMs: Date.now() - start };
     });
   }
@@ -117,12 +122,13 @@ export class PauseService {
       if (!s || !Number.isFinite(untilMs) || untilMs <= this.clock()) return { ok: false, error: 'rejected' };
       const start = Date.now();
       // Persist the job first: a disabled program must never exist without its re-enable job.
+      const prev = this.jobs[id];
       const withJob = { ...this.jobs, [id]: untilMs };
       if (!(await this.saveJobs(withJob))) return { ok: false, error: 'rejected' };
       try {
         await this.client.setProgram(id, scheduleToProgram({ ...s, enabled: false }), { deadlineMs: COMMAND_DEADLINE_MS });
       } catch (err) {
-        await this.saveJobs(this.without(id));
+        await this.saveJobs(prev === undefined ? this.without(id) : { ...this.jobs, [id]: prev });
         return { ok: false, error: this.mapError(err) };
       }
       this.patchSchedule(id, { enabled: false, pausedUntil: untilMs });
@@ -183,12 +189,14 @@ export class PauseService {
     this.appliedUntil = end;
     this.weather = false;
     this.record = { ...want, appliedHours: hours };
+    this.clearPending = false;
     this.store.patch({ rainDelayUntil: end });
     if (!(await this.saveRecord(this.record))) return { ok: false, error: 'rejected' };
     return { ok: true, confirmedInMs: Date.now() - start };
   }
 
   private async checkAll(now: number): Promise<void> {
+    if (this.clearPending && !this.record && (await this.saveRecord(null))) this.clearPending = false;
     const rec = this.record;
     if (!rec) return;
     if (rec.until <= now) {

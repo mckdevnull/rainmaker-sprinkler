@@ -228,4 +228,14 @@ describe('PauseService schedule pause', () => {
     expect((await svc.resumeSchedule(0)).ok).toBe(false);
     expect(svc.describe().schedules).toEqual({});
   });
+
+  it('a failed pauseSchedule extension restores the previous job', async () => {
+    const { svc, sim, persist } = await setup();
+    const d1 = Date.now() + DAY;
+    expect((await svc.pauseSchedule(0, d1)).ok).toBe(true);
+    sim.setOffline(true);
+    expect((await svc.pauseSchedule(0, Date.now() + 5 * DAY)).ok).toBe(false);
+    expect(svc.describe().schedules[0]).toBe(d1);
+    expect(await persist.get('scheduleJobs', {})).toEqual({ 0: d1 });
+  });
 });
