@@ -15,8 +15,9 @@ function fixture(startMs: number, count: number, prob: (i: number) => number, te
     },
   };
 }
-const respond = (body: unknown) =>
-  vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status: 200 }));
+// Typed params so mock.calls[0][0] is the URL.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const respond = (body: unknown) => vi.fn(async (_url: string) => new Response(JSON.stringify(body), { status: 200 }));
 
 afterEach(() => vi.useRealTimers());
 
