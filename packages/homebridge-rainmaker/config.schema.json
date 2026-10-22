@@ -1,0 +1,152 @@
+{
+  "pluginAlias": "Rainmaker",
+  "pluginType": "platform",
+  "singular": true,
+  "headerDisplay": "Siri, Alexa and Home app control of an OpenSprinkler controller. Run this plugin as a child bridge.",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "default": "Rainmaker",
+        "required": true
+      },
+      "controller": {
+        "title": "OpenSprinkler controller",
+        "type": "object",
+        "required": true,
+        "properties": {
+          "baseUrl": {
+            "title": "Controller address",
+            "type": "string",
+            "placeholder": "http://192.0.2.10",
+            "description": "http:// or https:// address of the OpenSprinkler controller.",
+            "required": true
+          },
+          "password": {
+            "title": "Device password",
+            "type": "string",
+            "required": true,
+            "x-schema-form": { "type": "password" }
+          }
+        }
+      },
+      "dataDir": {
+        "title": "Data folder",
+        "type": "string",
+        "placeholder": "rainmaker",
+        "description": "Where the hub keeps its settings and paired devices. Relative paths are inside the Homebridge storage folder."
+      },
+      "apiPort": {
+        "title": "App API port",
+        "type": "integer",
+        "default": 8787,
+        "minimum": 0,
+        "maximum": 65535,
+        "description": "Port the Rainmaker app connects to on this computer."
+      },
+      "allowedOrigins": {
+        "title": "Allowed web origins",
+        "type": "array",
+        "description": "Browser origins allowed to call the hub API, such as http://192.0.2.20:8080.",
+        "items": { "type": "string" }
+      },
+      "location": {
+        "title": "Location (for the rain forecast)",
+        "type": "object",
+        "properties": {
+          "lat": { "title": "Latitude", "type": "number", "minimum": -90, "maximum": 90 },
+          "lon": { "title": "Longitude", "type": "number", "minimum": -180, "maximum": 180 }
+        }
+      },
+      "warnings": {
+        "title": "Warnings before watering",
+        "type": "object",
+        "properties": {
+          "rainForecast": { "title": "Warn when rain is forecast", "type": "boolean", "default": true },
+          "rainThresholdPct": {
+            "title": "Rain chance that counts (%)",
+            "type": "integer",
+            "default": 50,
+            "minimum": 0,
+            "maximum": 100
+          },
+          "recentRun": { "title": "Warn when the zone ran recently", "type": "boolean", "default": true },
+          "recentRunWindowMin": {
+            "title": "Recent means within (minutes)",
+            "type": "integer",
+            "default": 60,
+            "minimum": 1,
+            "maximum": 1440
+          }
+        }
+      },
+      "plug": {
+        "title": "Smart plug for power-cycling the controller",
+        "type": "object",
+        "properties": {
+          "type": {
+            "title": "Plug type",
+            "type": "string",
+            "default": "none",
+            "oneOf": [
+              { "title": "None", "enum": ["none"] },
+              { "title": "Shelly", "enum": ["shelly"] },
+              { "title": "Tasmota", "enum": ["tasmota"] },
+              { "title": "HomeKit automation (uses the Sprinkler Controller Online sensor)", "enum": ["homekit-automation"] }
+            ]
+          },
+          "host": {
+            "title": "Plug host name or IP address",
+            "type": "string",
+            "placeholder": "192.0.2.30",
+            "condition": {
+              "functionBody": "return !!model.plug && (model.plug.type === 'shelly' || model.plug.type === 'tasmota');"
+            }
+          }
+        }
+      },
+      "notifications": {
+        "title": "Owner notifications",
+        "type": "object",
+        "properties": {
+          "offline": { "title": "Notify when the controller goes offline", "type": "boolean", "default": true },
+          "apnsKeyPath": { "title": "APNs key file path", "type": "string" },
+          "apnsKeyId": { "title": "APNs key ID", "type": "string" },
+          "apnsTeamId": { "title": "APNs team ID", "type": "string" },
+          "apnsBundleId": { "title": "APNs bundle ID", "type": "string" },
+          "ntfyTopic": {
+            "title": "ntfy topic",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,64}$"
+          },
+          "pushoverToken": {
+            "title": "Pushover application token",
+            "type": "string",
+            "x-schema-form": { "type": "password" }
+          },
+          "pushoverUser": { "title": "Pushover user key", "type": "string" }
+        }
+      },
+      "zoneDefaults": {
+        "title": "Voice run durations",
+        "type": "array",
+        "description": "How long a zone runs when started by Siri, Alexa or the Home app (default 600 seconds). Zone ids start at 0 for the first zone (S01).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "zone": { "title": "Zone id", "type": "integer", "minimum": 0, "required": true },
+            "voiceSeconds": {
+              "title": "Seconds",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64800,
+              "required": true
+            }
+          }
+        }
+      }
+    }
+  }
+}

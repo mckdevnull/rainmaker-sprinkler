@@ -1,0 +1,31 @@
+{
+  "name": "homebridge-rainmaker",
+  "displayName": "Rainmaker",
+  "version": "0.0.0",
+  "description": "Siri, Alexa and Home app control of OpenSprinkler controllers through the Rainmaker hub.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "config.schema.json"
+  ],
+  "keywords": [
+    "homebridge-plugin",
+    "opensprinkler",
+    "irrigation",
+    "sprinkler"
+  ],
+  "engines": {
+    "homebridge": "^1.8.0 || ^2.0.0",
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@rainmaker/hub-core": "*"
+  },
+  "devDependencies": {
+    "@rainmaker/controller-sim": "*",
+    "homebridge": "^2.4.0"
+  }
+}
