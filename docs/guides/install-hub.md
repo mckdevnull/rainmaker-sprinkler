@@ -83,6 +83,10 @@ Every field below is in the plugin's settings screen. Fields you leave out use t
 | Pushover application token and user key (`notifications.pushoverToken`, `pushoverUser`) | Both must be set together. |
 | Voice run durations (`zoneDefaults`) | A list of zone id and seconds. Sets how long a zone runs when started by Siri, Alexa or the Home app. Default 600 seconds. Zone ids start at 0 for the first zone (S01). Seconds can be 1 to 64800. |
 
+### Notifications
+
+The notification rows in the table above (`notifications.*`) control the owner notifications: the controller went offline, came back online, or is still offline after the smart plug power-cycled it.
+
 Rainmaker uses the first notification channel that is fully set, in this order: APNs, ntfy, Pushover. If none is set, notifications go to the log.
 
 Example `config.json` block for the Homebridge platform:
@@ -115,6 +119,8 @@ The iOS app is not built yet. The codes are ready for when it is.
 ## Option B: Run the hub on its own (no Homebridge)
 
 Use this if you do not run Homebridge. You get the hub and the app API, but no Siri or Alexa.
+
+> **Run only one hub per controller.** Do not run the Homebridge plugin and the standalone `rainmaker-hub` at the same time against the same controller. Each hub has its own request queue, so two hubs break the one-request-at-a-time rule the controller needs, and the second one also fails to start with `EADDRINUSE` when both use the same API port.
 
 1. Build the code, as in step 1 above.
 2. Copy `examples/hub.config.json` and edit it. Set `controller.baseUrl` and `controller.password` to your controller. The example points at the simulator on `127.0.0.1`.
