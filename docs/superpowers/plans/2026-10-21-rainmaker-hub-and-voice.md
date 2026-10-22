@@ -164,7 +164,7 @@ git commit -m "feat(sim): controller simulator with single-client and password m
   export interface JpResponse { nprogs: number; pd: ProgramData[]; }
   export type ProgramData = [number, number, number, number[], number[], string]; // flag, days0, days1, starts, durations, name
   export type LogEntry = [number, number, number, number];   // pid, sid, durSec, endTsLocal
-  export interface RequestOptions { deadlineMs?: number; signal?: AbortSignal }  // deadline overrides timeoutMs
+  export interface RequestOptions { deadlineMs?: number; signal?: AbortSignal; confirm?: boolean }  // deadline overrides timeoutMs; confirm → 'confirm' priority
   // errors.ts
   export class ControllerUnreachable extends Error {}
   export class ControllerUnauthorized extends Error {}
@@ -277,6 +277,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
     constructor(client: ControllerClient, store: StateStore, opts?: Partial<PollerOptions>);
     start(): void; stop(): void;
     pollNow(): Promise<void>;      // one /jc + /js round; /jn, /jp, /jo only when nbrd/nstations changed or every 60 s
+    applyStatus(jc: JcResponse, js?: JsResponse): void;   // the mapping pollNow uses; Commands calls it after a confirm read
   }
   ```
 - Mapping: `sbits` bit per station → `running`; `ps[sid] = [pid, remaining, start]` → `remainingSec` and `queued` when `pid !== 0 && remaining > 0 && !running`; `tzOffsetSec = round((devt - floor(Date.now()/1000)) / 900) * 900`; `rd===1` → `rainDelayUntil = localToUtcMs(rdst, tzOffsetSec)`; `pd[i][0] & 1` → `enabled`, `& 2` → `weatherAdjust`.
@@ -464,7 +465,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   export interface Capabilities { mqtt: boolean; pauseUntil: true; maxRainDelayHours: 32767; firmware: number | null }
   export interface Hub {
     store: StateStore; commands: Commands; pause: PauseService; history: RunHistory; forecast(): Promise<Forecast | null>;
-    settings: SettingsStore; watchdog: Watchdog; notifier: Notifier;
+    settings: SettingsStore; watchdog: Watchdog; notifier: Notifier; pairing: Pairing;
     start(): Promise<void>; stop(): Promise<void>; capabilities(): Capabilities;
   }
   export function createHub(config: HubConfig): Hub;
