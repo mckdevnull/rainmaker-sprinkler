@@ -3,7 +3,7 @@ import { optional, reqBool, reqInt, reqObject, MAX_RUN_SECONDS, ValidationError 
 import { evaluateWarnings } from '../../warnings/warnings.js';
 import type { CommandSource } from '../../commands/commands.js';
 import { commandResponse, HttpError, ok, parseSource, zoneId, type Handler } from './context.js';
-import { photoDir, photoPath } from './state.js';
+import { forecastOrNull, photoDir, photoPath } from './state.js';
 
 /** Sources a person is looking at; the others (HomeKit, Alexa) never get warnings. */
 const WARNED_SOURCES: readonly CommandSource[] = ['app', 'web', 'siri-intent'];
@@ -21,7 +21,7 @@ export const runZone: Handler = async (hub, req) => {
     const warnings = evaluateWarnings(
       id,
       hub.settings.get().warnings,
-      await hub.forecast(),
+      await forecastOrNull(hub), // a dead network must not hold up a run
       Number.isFinite(lastRunAt) ? lastRunAt : null,
       Date.now(),
     );

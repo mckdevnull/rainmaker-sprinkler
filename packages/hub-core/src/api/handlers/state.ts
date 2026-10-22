@@ -19,7 +19,8 @@ async function photoIds(hub: Hub): Promise<Set<number>> {
   }
 }
 
-async function forecastOrNull(hub: Hub): Promise<Forecast | null> {
+/** The forecast, or null if it fails or takes longer than 1.5 s. */
+export async function forecastOrNull(hub: Hub): Promise<Forecast | null> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), FORECAST_WAIT_MS);

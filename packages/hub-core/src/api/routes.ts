@@ -58,8 +58,8 @@ export const ROUTES: readonly Route[] = [
   { ...r('POST', '/v1/pair', pair, 'json', true), rateLimited: true },
   r('POST', '/v1/pairing/start', startPairing, 'json'),
   r('GET', '/v1/devices', listDevices),
-  r('DELETE', '/v1/devices/:token', deleteDevice),
-  r('PUT', '/v1/devices/:token/push', registerPush, 'json'),
+  r('DELETE', '/v1/devices/:id', deleteDevice),
+  r('PUT', '/v1/devices/:id/push', registerPush, 'json'),
 ];
 
 export type Match =

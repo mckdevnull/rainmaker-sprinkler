@@ -40,7 +40,8 @@ describe('Pairing', () => {
     const claimed = p.claim(code, 'Kitchen iPad');
     expect(claimed?.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(p.verify(claimed?.token ?? '')).toBe(true);
-    expect(p.list()).toEqual([{ name: 'Kitchen iPad', createdAt: now }]);
+    expect(p.list()).toEqual([{ id: p.deviceId(claimed?.token ?? ''), name: 'Kitchen iPad', createdAt: now }]);
+    expect(p.list()[0]?.id).toMatch(/^[0-9a-f]{64}$/);
     expect(p.claim(code, 'again')).toBeNull(); // single use
   });
 
@@ -61,7 +62,9 @@ describe('Pairing', () => {
   it('revoke', async () => {
     const p = await pairing();
     const token = p.claim(p.startPairing().code, 'Phone')?.token ?? '';
-    p.revoke(token);
+    p.revoke(token); // a raw token is not an id: no effect
+    expect(p.verify(token)).toBe(true);
+    p.revoke(p.list()[0]?.id ?? '');
     expect(p.verify(token)).toBe(false);
     expect(p.list()).toEqual([]);
   });
@@ -128,8 +131,8 @@ describe('Pairing', () => {
     const token = p.claim(p.startPairing().code, 'Phone')?.token ?? '';
     const revoked: unknown[] = [];
     p.on('revoked', (id) => revoked.push(id));
-    const id = p.deviceId(token);
-    p.revoke(token);
+    const id = p.deviceId(token) ?? '';
+    p.revoke(id);
     expect(revoked).toEqual([id]);
   });
 

@@ -93,8 +93,9 @@ export class Pairing extends EventEmitter {
     return this.find(token) !== null || this.matchesTrusted(token);
   }
 
-  revoke(token: string): void {
-    const found = this.find(token);
+  /** Revokes by device id (see `list()`/`deviceId`); unknown ids are ignored. */
+  revoke(id: string): void {
+    const found = this.devices.find((d) => d.hash === id);
     if (!found) return;
     this.save(this.devices.filter((d) => d !== found));
     this.emit('revoked', found.hash);
@@ -105,8 +106,9 @@ export class Pairing extends EventEmitter {
     return this.burned + (this.liveExpired() ? 1 : 0);
   }
 
-  list(): { name: string; createdAt: number }[] {
-    return this.devices.map(({ name, createdAt }) => ({ name, createdAt }));
+  /** `id` is the hex SHA-256 of the device's token: safe to show and to put in URLs. */
+  list(): { id: string; name: string; createdAt: number }[] {
+    return this.devices.map(({ hash, name, createdAt }) => ({ id: hash, name, createdAt }));
   }
 
   /** A stable, non-secret id for a paired device's token (its hash); null when unknown. */

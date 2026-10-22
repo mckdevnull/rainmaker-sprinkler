@@ -33,11 +33,13 @@ function freeze(s: Settings): Settings {
  */
 export class SettingsStore {
   private current: Settings;
+  private readonly zoneDefaults: HubConfig['zoneDefaults'];
 
   constructor(
     private readonly persist: JsonStore,
     config: Pick<HubConfig, 'warnings' | 'zoneDefaults' | 'notifications'>,
   ) {
+    this.zoneDefaults = config.zoneDefaults;
     const zones: Record<number, ZoneSettings> = {};
     for (const [k, z] of Object.entries(config.zoneDefaults)) zones[Number(k)] = { voiceSeconds: z.voiceSeconds };
     this.current = freeze({
@@ -56,8 +58,11 @@ export class SettingsStore {
     return this.current;
   }
 
+  /** Saved zone setting, else the config's zoneDefaults, else 600. */
   voiceSeconds(zoneId: number): number {
-    return this.current.zones[zoneId]?.voiceSeconds ?? DEFAULT_VOICE_SECONDS;
+    return (
+      this.current.zones[zoneId]?.voiceSeconds ?? this.zoneDefaults[zoneId]?.voiceSeconds ?? DEFAULT_VOICE_SECONDS
+    );
   }
 
   /** Persists first; memory changes only once the write succeeded. */

@@ -28,7 +28,8 @@ describe('routes', () => {
     expect(s.online).toBe(true);
     expect(s.zones).toHaveLength(8);
     expect(s.zones[0]).toMatchObject({ id: 0, name: 'Front lawn', voiceSeconds: 300, photo: false, lastRunAt: null });
-    expect(s.zones[1]).toMatchObject({ name: 'S02', voiceSeconds: 600 });
+    expect(s.zones[1]).toMatchObject({ name: 'S02', voiceSeconds: 120 });
+    expect(s.zones[2]).toMatchObject({ voiceSeconds: 600 });
     expect(s.capabilities).toEqual({ mqtt: false, pauseUntil: true, maxRainDelayHours: 32767, firmware: 216 });
     expect(s.pause).toEqual({ all: null, schedules: {} });
     expect(s.forecast).toBeNull();
@@ -186,6 +187,15 @@ describe('routes: validation and the rest of the surface', () => {
     expect((t.sim.state.programs[0]?.flag ?? -1) & 1).toBe(1);
   });
 
+  it('zoneDefaults still apply after another zone\'s settings are saved', async () => {
+    const t = await startHub({ config: { zoneDefaults: { 1: { voiceSeconds: 120 } } } });
+    expect((await t.api('PUT', '/v1/settings', { zones: { 2: { name: 'Roses' } } })).status).toBe(200);
+    const s = await json(await t.api('GET', '/v1/state'));
+    expect(s.zones[1].voiceSeconds).toBe(120);
+    expect(s.zones[2]).toMatchObject({ name: 'Roses', voiceSeconds: 600 });
+    expect(t.hub.settings.voiceSeconds(1)).toBe(120);
+  });
+
   it('reads and writes settings', async () => {
     const t = await startHub();
     const put = await t.api('PUT', '/v1/settings', {
@@ -238,16 +248,18 @@ describe('routes: validation and the rest of the surface', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, deviceName: 'Phone' }),
     });
-    const { token } = await json(paired);
-    expect((await t.api('GET', '/v1/devices')).status).toBe(200);
-    expect((await json(await t.api('GET', '/v1/devices'))).map((d: { name: string }) => d.name)).toEqual([
-      'test device',
-      'Phone',
-    ]);
-    const push = await t.api('PUT', `/v1/devices/${token}/push`, { apnsToken: 'ab'.repeat(32) });
+    const { token, id } = await json(paired);
+    expect(id).toMatch(/^[0-9a-f]{64}$/);
+    const devices = await json(await t.api('GET', '/v1/devices'));
+    expect(devices.map((d: { name: string }) => d.name)).toEqual(['test device', 'Phone']);
+    expect(devices[1]).toEqual({ id, name: 'Phone', createdAt: expect.any(Number) });
+    expect(JSON.stringify(devices)).not.toContain(token);
+    const push = await t.api('PUT', `/v1/devices/${id}/push`, { apnsToken: 'ab'.repeat(32) });
     expect(push.status).toBe(200);
-    expect((await t.api('DELETE', `/v1/devices/${token}`)).status).toBe(200);
+    expect((await t.api('PUT', `/v1/devices/${token}/push`, { apnsToken: 'ab'.repeat(32) })).status).toBe(404);
+    expect((await t.api('DELETE', `/v1/devices/${token}`)).status).toBe(404); // raw tokens are not ids
+    expect((await t.api('DELETE', `/v1/devices/${id}`)).status).toBe(200);
     expect((await fetch(`${t.url}/v1/state`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(401);
-    expect((await t.api('DELETE', `/v1/devices/${token}`)).status).toBe(404);
+    expect((await t.api('DELETE', `/v1/devices/${id}`)).status).toBe(404);
   });
 });

@@ -141,6 +141,8 @@ export class Notifier {
         this.logger.error(`rainmaker: APNs request failed: ${err.message}`);
         resolve();
       });
+      // A timed-out (closed) stream may never emit 'end'; settling twice is harmless.
+      req.on('close', () => resolve());
       req.end(body);
     });
   }

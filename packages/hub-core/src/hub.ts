@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { Pairing, newToken, PAIRING_CODE_TTL_MS } from './api/auth.js';
-import { advertise, type MdnsAdvertiser } from './api/mdns.js';
+import { advertise, type BonjourLike, type MdnsAdvertiser } from './api/mdns.js';
 import { ApiServer } from './api/server.js';
 import { COMMAND_DEADLINE_MS, Commands, type CommandError, type CommandResult } from './commands/commands.js';
 import type { HubConfig } from './config.js';
@@ -33,13 +33,14 @@ export interface Capabilities {
  * - `fetchImpl`: used for the forecast, notifications and smart plug (not the controller).
  * - `clock`: UTC ms, for pairing, pause and watchdog.
  * - `logger`: hub log lines (pairing code, failures); default `console`.
- * - `mdns`: false skips the mDNS advertisement (tests).
+ * - `mdns`: false skips the mDNS advertisement (tests); `mdnsFactory` replaces bonjour-service.
  */
 export interface HubDeps {
   fetchImpl?: typeof fetch;
   clock?: () => number;
   logger?: Logger;
   mdns?: boolean;
+  mdnsFactory?: () => BonjourLike;
 }
 
 export interface Hub {
@@ -97,6 +98,8 @@ export function createHub(config: HubConfig, deps: HubDeps = {}): Hub {
   const pairing = new Pairing(persist, clock, logger);
 
   let server: ApiServer | null = null;
+  /** The in-flight or finished start; null when stopped. Makes start() idempotent. */
+  let lifecycle: Promise<void> | null = null;
   let mdns: MdnsAdvertiser | null = null;
   let pairingTimer: NodeJS.Timeout | null = null;
   let historyTimer: NodeJS.Timeout | null = null;
@@ -191,41 +194,60 @@ export function createHub(config: HubConfig, deps: HubDeps = {}): Hub {
       return { ok: true, confirmedInMs: Date.now() - start };
     },
 
-    async start() {
-      await fs.mkdir(config.dataDir, { recursive: true });
-      await settings.load();
-      await pairing.load();
-      await ensureCliToken();
-      await poller.pollNow().catch((err: unknown) => logger.warn('rainmaker: first poll failed', err));
-      poller.start();
-      void refreshHistory();
-      historyTimer = setInterval(() => void refreshHistory(), HISTORY_REFRESH_MS);
-      historyTimer.unref();
-      pause.start();
-      watchdog.start();
-      wireNotifications();
-      server = new ApiServer(hub);
-      await server.listen(config.apiPort, '0.0.0.0');
-      logger.log(`Rainmaker hub listening on ${server.port()}`);
-      if (deps.mdns !== false) mdns = advertise(server.port(), { logger });
-      issuePairingCode();
-      pairingTimer = setInterval(issuePairingCode, PAIRING_CODE_TTL_MS);
-      pairingTimer.unref();
+    start() {
+      lifecycle ??= startAll().catch(async (err: unknown) => {
+        // Undo whatever came up before the failure, then let the caller see the error.
+        await stopAll().catch((e: unknown) => logger.error('rainmaker: cleanup after failed start failed', e));
+        lifecycle = null;
+        throw err;
+      });
+      return lifecycle;
     },
 
     async stop() {
-      if (pairingTimer) clearInterval(pairingTimer);
-      if (historyTimer) clearInterval(historyTimer);
-      pairingTimer = historyTimer = null;
-      for (const off of unsubscribe.splice(0)) off();
-      await mdns?.stop();
-      mdns = null;
-      await server?.close();
-      watchdog.stop();
-      pause.stop();
-      poller.stop();
+      const running = lifecycle;
+      lifecycle = null;
+      await running?.catch(() => undefined);
+      await stopAll();
     },
   };
+
+  async function startAll(): Promise<void> {
+    await fs.mkdir(config.dataDir, { recursive: true });
+    await settings.load();
+    await pairing.load();
+    await ensureCliToken();
+    await poller.pollNow().catch((err: unknown) => logger.warn('rainmaker: first poll failed', err));
+    poller.start();
+    void refreshHistory();
+    historyTimer = setInterval(() => void refreshHistory(), HISTORY_REFRESH_MS);
+    historyTimer.unref();
+    pause.start();
+    watchdog.start();
+    wireNotifications();
+    server = new ApiServer(hub);
+    await server.listen(config.apiPort, '0.0.0.0');
+    logger.log(`Rainmaker hub listening on ${server.port()}`);
+    if (deps.mdns !== false) mdns = advertise(server.port(), { logger, factory: deps.mdnsFactory });
+    issuePairingCode();
+    pairingTimer = setInterval(issuePairingCode, PAIRING_CODE_TTL_MS);
+    pairingTimer.unref();
+  }
+
+  async function stopAll(): Promise<void> {
+    if (pairingTimer) clearInterval(pairingTimer);
+    if (historyTimer) clearInterval(historyTimer);
+    pairingTimer = historyTimer = null;
+    for (const off of unsubscribe.splice(0)) off();
+    await mdns?.stop();
+    mdns = null;
+    await server?.close();
+    server = null;
+    watchdog.stop();
+    pause.stop();
+    poller.stop();
+  }
+
   return hub;
 }
 

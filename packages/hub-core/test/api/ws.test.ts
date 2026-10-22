@@ -88,7 +88,11 @@ describe('WebSocket', () => {
     const bystander = await connect(t);
     bystander.ws.send(JSON.stringify({ type: 'auth', token: other }));
     await eventually(() => victim.messages.length > 0 && bystander.messages.length > 0);
-    const res = await fetch(`${t.url}/v1/devices/${t.token}`, {
+    const list = (await (
+      await fetch(`${t.url}/v1/devices`, { headers: { Authorization: `Bearer ${other}` } })
+    ).json()) as { id: string; name: string }[];
+    const victimId = list.find((d) => d.name === 'test device')?.id;
+    const res = await fetch(`${t.url}/v1/devices/${victimId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${other}` },
     });

@@ -57,6 +57,9 @@ export async function startHub(
   return t;
 }
 
+/** The most recently created test hub (also when its start() failed). */
+export const lastHub = (): TestHub | undefined => running[running.length - 1];
+
 export async function stopHubs(): Promise<void> {
   for (const t of running.splice(0)) {
     await t.hub.stop();
