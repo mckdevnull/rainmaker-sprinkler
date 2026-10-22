@@ -16,5 +16,6 @@ Fast, dependable voice and app control for **OpenSprinkler** irrigation controll
 Planning. Nothing is built yet.
 
 - Design: [docs/superpowers/specs/2026-10-21-rainmaker-design.md](docs/superpowers/specs/2026-10-21-rainmaker-design.md)
+- Build plan, hub and voice: [docs/superpowers/plans/2026-10-21-rainmaker-hub-and-voice.md](docs/superpowers/plans/2026-10-21-rainmaker-hub-and-voice.md)
 - Research: [docs/research/](docs/research/)
 - Mockups: [docs/mockups/](docs/mockups/) (open the HTML files in a browser)
