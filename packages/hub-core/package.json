@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "rainmaker-hub": "./dist/src/bin/rainmaker-hub.js"
+    "rainmaker-hub": "./dist/src/bin/rainmaker-hub.js",
+    "rainmaker-latency": "./dist/src/bin/rainmaker-latency.js"
   },
   "exports": {
     ".": {
