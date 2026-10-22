@@ -245,17 +245,19 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   // model.ts
   export type ZoneStatus = 'idle' | 'running' | 'queued' | 'unknown';
   export interface Zone { id: number; name: string; status: ZoneStatus; remainingSec: number | null; lastRunAt: number | null; }
-  export type ScheduleKind = 'weekly' | 'interval' | 'odd-days' | 'even-days';
+  export type ScheduleKind = 'weekly' | 'biweekly' | 'monthly' | 'interval';   // flag bits 4–5 (firmware 2.1.7 program.h: 0 weekly, 1 biweekly, 2 monthly, 3 interval)
+  export type OddEven = 'none' | 'odd' | 'even';                               // flag bits 2–3 (0 none, 1 odd, 2 even)
   export interface Schedule {
-    id: number; name: string; enabled: boolean; weatherAdjust: boolean; kind: ScheduleKind;
-    days: boolean[];            // weekly only (Mon..Sun); empty otherwise
-    startMinutes: number[];     // up to 4, -1 entries removed
+    id: number; name: string; enabled: boolean; weatherAdjust: boolean; kind: ScheduleKind; oddEven: OddEven;
+    fixedStartTimes: boolean;   // flag bit 6: 1 = up to 4 fixed start times; 0 = repeating (starts[0] start, [1] repeat count, [2] repeat every)
+    days: boolean[];            // weekly only (Mon..Sun, days0 bit 0 = Monday); empty otherwise
+    startMinutes: number[];     // fixed type: up to 4, -1 entries removed; repeating type: [start] only
     zoneMinutes: Record<number, number>;
     pausedUntil: number | null;
     raw: ProgramData;           // the untouched /jp entry; every write starts from this
   }
   export interface ControllerState {
-    online: boolean; unauthorized: boolean; lastSeenAt: number | null;
+    online: boolean; unauthorized: boolean; lastSeenAt: number | null;   // lastSeenAt is excluded from the change diff (store keeps it outside the compared state)
     tzOffsetSec: number;        // derived from devt each poll; 0 until first poll
     enabled: boolean; rainDelayUntil: number | null;   // UTC ms
     zones: Zone[]; schedules: Schedule[];
@@ -292,7 +294,10 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `shrinks zones when the controller reports fewer stations` (Review Focus 2): `sim.setStationCount(4)` between polls → `zones.length===4`, no throw.
   - `patch emits change only on real differences`.
   - `rain delay end is converted from controller-local time`: sim `tzOffsetSec: -21600`, `/cv?rd=2` → `rainDelayUntil` within 1 s of `Date.now() + 2h` (not off by 6 h).
-  - `program round-trip is lossless`: `scheduleToProgram(programToSchedule(0, pd))` deep-equals `pd` for a weekly, an interval and an odd-day fixture; flipping only `enabled` changes only bit 0.
+  - `program round-trip is lossless`: `scheduleToProgram(programToSchedule(0, pd))` deep-equals `pd` for a weekly, an interval (flag `0b0110001` = type 3, enabled), a weekly odd-day (`0b0000101`) and a repeating-start fixture; flipping only `enabled` changes only bit 0.
+  - `lastSeenAt does not cause change events`: two identical idle polls → `'change'` emitted once (first) then zero times.
+  - `goes offline on exactly the third consecutive failure`: after 2 failures `online` still true; after the 3rd `online` false.
+  - `PollSuperseded does not count as a failure`.
 
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** `model.ts`, `store.ts` (deep-equal via `node:util.isDeepStrictEqual`), `poller.ts`.
