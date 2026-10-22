@@ -12,9 +12,9 @@ export type PlugConfig =
   | { type: 'none' };
 
 const CALL_TIMEOUT_MS = 5000;
-const HOST_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9.:-]*[A-Za-z0-9])?$/;
+const HOST_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 
-/** A hostname or IP only: no scheme, path, credentials or whitespace. */
+/** A hostname or IPv4 only (IPv6 literals unsupported): no scheme, path, credentials or whitespace. */
 export function assertPlugHost(host: string): void {
   if (!host || /[\s/@]/.test(host) || !HOST_PATTERN.test(host)) {
     throw new Error(

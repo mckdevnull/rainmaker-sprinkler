@@ -46,7 +46,7 @@ describe('smart plug drivers', () => {
   });
 
   it('rejects hosts with scheme, path, whitespace or credentials', () => {
-    for (const host of ['http://plug.local', 'plug.local/x', 'plug local', 'u@plug.local', '']) {
+    for (const host of ['http://plug.local', 'plug.local/x', 'plug local', 'u@plug.local', 'plug.local:8080', '']) {
       expect(() => createPlug({ type: 'shelly', host })).toThrow(/host/i);
     }
   });

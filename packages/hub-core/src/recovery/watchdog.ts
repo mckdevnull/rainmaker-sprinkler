@@ -37,7 +37,7 @@ export class Watchdog extends EventEmitter {
   }
 
   start(): void {
-    if (this.running) return;
+    if (this.running || !this.plug) return; // no plug: nothing to listen for, emit or schedule
     this.running = true;
     this.store.on('offline', this.onOffline);
     this.store.on('online', this.onOnline);
@@ -82,6 +82,7 @@ export class Watchdog extends EventEmitter {
       return;
     }
     if (this.cycles.length >= this.opts.maxPerHour) {
+      // Budget spent: no retries until the controller recovers; the owner is told via 'recovery-exhausted'.
       this.exhausted = true;
       this.clearTimer();
       this.emit('recovery-exhausted');

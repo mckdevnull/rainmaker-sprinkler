@@ -84,7 +84,7 @@ describe('Watchdog', () => {
     expect(exhausted()).toBe(1);
   });
 
-  it('emits recovered when store comes back online and re-arms exhaustion', async () => {
+  it('emits recovered when store comes back online', async () => {
     make();
     store.patch({ online: false });
     await vi.advanceTimersByTimeAsync(0);
@@ -92,6 +92,20 @@ describe('Watchdog', () => {
     expect(events.at(-1)).toEqual(['recovered', { afterCycles: 1 }]);
     await vi.advanceTimersByTimeAsync(30 * MIN);
     expect(plug.calls).toHaveLength(1); // timer cancelled
+  });
+
+  it('re-emits recovery-exhausted after exhausted, recovered, offline again', async () => {
+    make();
+    store.patch({ online: false });
+    await vi.advanceTimersByTimeAsync(35 * MIN);
+    const exhausted = () => events.filter(([e]) => e === 'recovery-exhausted').length;
+    expect(exhausted()).toBe(1);
+    store.patch({ online: true });
+    expect(events.at(-1)).toEqual(['recovered', { afterCycles: 3 }]);
+    store.patch({ online: false }); // still 3 cycles in the trailing hour
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plug.calls).toHaveLength(3);
+    expect(exhausted()).toBe(2);
   });
 
   it('counts a failing plug as an attempt and keeps going', async () => {
@@ -113,6 +127,15 @@ describe('Watchdog', () => {
     await vi.advanceTimersByTimeAsync(2 * 60 * MIN);
     expect(events).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('emits nothing for a null plug across offline then online', async () => {
+    make(null);
+    store.patch({ online: false });
+    store.patch({ online: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events).toEqual([]);
+    expect(store.listenerCount('offline')).toBe(0);
   });
 
   it('stop() removes listeners and timers', async () => {
