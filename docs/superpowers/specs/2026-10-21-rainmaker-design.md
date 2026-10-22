@@ -67,7 +67,7 @@ So voice is a primary interface, not an add-on, and Alexa must be as dependable 
 **Controller**
 
 - An old OpenSprinkler v2-family board with Ethernet only and an expansion port.
-- **The exact revision is unknown.** The controller is currently offline, and the owner will read it once they're in front of it. Check `hwv` from `/jo`, or the LCD at boot.
+- **Confirmed 2026-10-21:** the owner's controller is **hardware v2.2 (AC)** running **firmware 2.1.6(1)**. That's an ATmega644P at 16 MHz, with a CH340 USB-serial port. The design still supports the other revisions:
   - **v2.0, v2.1, v2.2** (ATmega644): the last firmware is **2.1.7**. There is **no MQTT**, 4 KB RAM, and a 950-byte network buffer.
   - **v2.3** (ATmega1284P): the last firmware is **2.2.1(4) AVR hotfix 1**. It has MQTT, but needs a working microSD card.
   - Neither has OpenThings Cloud, HTTPS or over-the-air updates.
@@ -77,7 +77,7 @@ So voice is a primary interface, not an add-on, and Alexa must be as dependable 
 **Owner's environment**
 
 - **Homebridge** runs on a **Windows 11** PC under Node.js. That PC must be set to **never sleep**.
-- An **Apple TV HD** acts as the Apple Home hub. This gives Siri and the Home app remote access. Confirm the Apple TV HD is still supported as a home hub on the current tvOS.
+- An **Apple TV HD** is the Apple Home hub, confirmed in use by the owner. This gives Siri and the Home app remote access.
 - Echo devices for Alexa.
 - **Vera** runs other Z-Wave accessories. It currently also exposes the sprinkler zones to HomeKit, for visibility only.
 - iPhone and iPad only.
@@ -239,9 +239,9 @@ This is the **only** thing that talks to the controller. Every other client (Hom
 - **Live updates:** a WebSocket to the hub while in the foreground. No pull-to-refresh is needed.
 - **Extras, phased later:** Home Screen and Lock Screen widgets, a Live Activity countdown while a zone runs, and Control Center controls.
 - **Firmware coverage (my call):**
-  - **Fully supported and tested:** v2.x boards on firmware 2.1.7 through 2.2.1(4), via the simulator and the owner's board.
+  - **Fully supported and tested:** v2.x boards on firmware 2.1.6 through 2.2.1(4), via the simulator and the owner's board (v2.2 on 2.1.6(1)).
   - **Best effort:** newer boards (v3, v4, OSPi on current firmware). They use the same API, and the hub detects capabilities from `/jo` and `/jc` and hides what the controller lacks.
-  - Firmware older than 2.1.7 isn't supported. The setup guide says to update first.
+  - Firmware older than 2.1.6 isn't supported. The setup guide says to update first.
 
 ### 5.5 On-controller web page
 
@@ -296,6 +296,12 @@ These are estimates until measured on the real board. **Measure them in Phase 1*
    - Enable MQTT to a local broker (e.g. Mosquitto on the Windows PC). The hub subscribes for instant updates.
    - Add the firmware's daily reboot program as an extra guard against network dropouts.
 3. **v2.0, v2.1, v2.2:** flash **2.1.7** with the board-specific avrdude command (see the firmware research). There's no MQTT, so the hub relies on polling plus its watchdog.
+   - **The owner's board is v2.2 on 2.1.6(1), so this is the path.**
+   - Flash command: `avrdude -c arduino -p m644p -P <CH340 port> -U flash:w:firmware2.1.7.hex`.
+   - **2.1.7 is the last firmware this board can ever run**, and it's a small step. The main change is that 2.1.7 expects the `pw` parameter as an MD5 hash, where 2.1.6 takes plain text. The hub handles both.
+   - **Don't assume the password or settings survive the update.** Export the configuration first, and re-check the password afterwards. It may reset to `opendoor`.
+   - Treat this as a low-priority, optional step. Rainmaker must work on 2.1.6(1) as-is, so add **2.1.6 to the supported range** (§5.4).
+   - Without MQTT or the daily reboot program, recovery from dropouts on this board depends on the **hub watchdog and smart-plug power-cycle**. That moves the smart plug from "optional" to **recommended** for the owner.
 4. Write a step-by-step flashing guide for macOS and Windows in the repo.
 5. **A custom Rainmaker firmware fork is out of scope for now.** The 644 boards have no free code space, and the hub covers the reliability gaps. Revisit only if the measured latency or dropouts need on-board fixes.
 
@@ -354,5 +360,5 @@ The existing 24 VAC transformer and the field wiring carry over. v2 expansion bo
 
 ## 13. Open items
 
-- **Board revision and firmware** (`hwv`/`fwv`): the owner reads these when the controller is back online. Phase 0 branches on the result (§7).
-- **Apple TV HD as home hub:** confirm it's still supported on the current tvOS before relying on it for remote Siri and Home access.
+- None blocking. The board (v2.2 on 2.1.6(1)) and the Apple TV home hub are both confirmed.
+- **Smart plug:** the owner should choose a plug for automatic power-cycling. On this board it's the main defence against network dropouts (§5.1, §7).
