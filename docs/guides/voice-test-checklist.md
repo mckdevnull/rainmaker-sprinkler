@@ -41,6 +41,12 @@ first so the new accessories appear.
 |---|--------|-----------------|------------------|-------------------|-------|
 | 11 | "Turn on &lt;zone&gt;" while the controller is offline | Siri reports a problem; Alexa says the device is not responding; "Sprinkler Controller Online" shows open | | | |
 
+**Home app check** (no voice: tap in the Home app on the iPhone)
+
+| # | Action | Expected result | Pass/fail | Notes |
+|---|--------|-----------------|-----------|-------|
+| 12 | In the Home app, tap one valve on the Sprinklers tile | Only that zone runs (not every zone) | | |
+
 **Result**
 
 - All phrases pass for both assistants: ☐ yes ☐ no

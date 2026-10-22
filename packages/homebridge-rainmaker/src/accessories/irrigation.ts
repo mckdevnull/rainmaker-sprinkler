@@ -1,6 +1,6 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 import { parseVoiceSeconds, type CommandResult, type ControllerState, type Zone } from '@rainmaker/hub-core';
-import { MAX_DURATION_SECONDS } from '../constants.js';
+import { MAX_DURATION_SECONDS, SYSTEM_ACTIVE_GRACE_MS } from '../constants.js';
 import { hapError, perform, revertSoon, whenOnline, type Part, type PartContext } from './common.js';
 
 export const IRRIGATION_NAME = 'Sprinklers';
@@ -155,10 +155,16 @@ export class IrrigationAccessory implements Part {
       return;
     }
     if (this.systemActive() === C.Active.ACTIVE) return;
+    // The Home app may write Active=1 here when one valve is tapped; that valve's write then starts a zone.
+    await new Promise((resolve) => setTimeout(resolve, SYSTEM_ACTIVE_GRACE_MS));
+    if (this.systemActive() === C.Active.ACTIVE) return;
     await perform(this.ctx, 'run all zones', () => this.runAllZones(), revert);
   }
 
-  /** One runZone per zone, in order (the firmware queues them); stops at the first failure. */
+  /**
+   * One runZone per zone, in order (the firmware queues them). At the first failure, zones already
+   * started are stopped again, so a failed "run all" never leaves part of the garden watering.
+   */
   private async runAllZones(): Promise<CommandResult> {
     const { hub } = this.ctx;
     const zones = hub.store.get().zones;
@@ -166,10 +172,18 @@ export class IrrigationAccessory implements Part {
     let total = 0;
     for (const zone of zones) {
       const result = await hub.commands.runZone(zone.id, hub.settings.voiceSeconds(zone.id), 'homekit');
-      if (!result.ok) return result;
+      if (!result.ok) {
+        if (zone !== zones[0]) await this.stopAfterPartialRun();
+        return result;
+      }
       total += result.confirmedInMs;
     }
     return { ok: true, confirmedInMs: total };
+  }
+
+  private async stopAfterPartialRun(): Promise<void> {
+    const stopped = await this.ctx.hub.commands.stopAll('homekit');
+    if (!stopped.ok) this.ctx.log.error(`Rainmaker: could not stop zones after a failed run all (${stopped.error})`);
   }
 
   private zone(id: number): Zone | undefined {

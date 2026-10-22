@@ -142,6 +142,46 @@ describe('Sprinklers irrigation system', () => {
     expect(system.value(C.Active)).toBe(C.Active.ACTIVE);
   });
 
+  it('system Active with a concurrent valve write runs only that zone', async () => {
+    const r = await launch({ sim: { nStations: 3 } });
+    const hub = r.platform.hub!;
+    const runZone = vi.spyOn(hub.commands, 'runZone');
+    const acc = r.api.accessory('Sprinklers');
+    const system = acc.getService(S.IrrigationSystem)!;
+    // The Home app sends the system write first, then the valve write, in the same tap.
+    const systemWrite = system.getCharacteristic(C.Active).set(C.Active.ACTIVE);
+    const valveWrite = valve(acc, 1).getCharacteristic(C.Active).set(C.Active.ACTIVE);
+    await Promise.all([systemWrite, valveWrite]);
+    expect(runZone.mock.calls).toEqual([[1, 600, 'homekit']]);
+    expect(r.sim.state.stations.map((s) => s.running)).toEqual([false, true, false]);
+  });
+
+  it('partial failure of run-all stops everything', async () => {
+    const r = await launch({ sim: { nStations: 3 } });
+    const hub = r.platform.hub!;
+    const real = hub.commands.runZone.bind(hub.commands);
+    vi.spyOn(hub.commands, 'runZone').mockImplementation((id, seconds, source) =>
+      id === 1 ? Promise.resolve({ ok: false, error: 'timeout' }) : real(id, seconds, source),
+    );
+    const stopAll = vi.spyOn(hub.commands, 'stopAll');
+    const system = r.api.accessory('Sprinklers').getService(S.IrrigationSystem)!;
+    const err = await system.getCharacteristic(C.Active).set(C.Active.ACTIVE).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HapStatusError);
+    expect(stopAll).toHaveBeenCalledWith('homekit');
+    expect(r.sim.state.stations.every((s) => !s.running)).toBe(true);
+    expect(hub.store.get().zones.every((z) => z.status === 'idle')).toBe(true);
+  });
+
+  it('a first-zone failure of run-all does not send a stop', async () => {
+    const r = await launch({ sim: { nStations: 2 } });
+    const hub = r.platform.hub!;
+    vi.spyOn(hub.commands, 'runZone').mockResolvedValue({ ok: false, error: 'offline' });
+    const stopAll = vi.spyOn(hub.commands, 'stopAll');
+    const system = r.api.accessory('Sprinklers').getService(S.IrrigationSystem)!;
+    await expect(system.getCharacteristic(C.Active).set(C.Active.ACTIVE)).rejects.toBeInstanceOf(HapStatusError);
+    expect(stopAll).not.toHaveBeenCalled();
+  });
+
   it('turning off the Sprinklers system stops all', async () => {
     const r = await launch();
     const hub = r.platform.hub!;
