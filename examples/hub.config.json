@@ -1,0 +1,11 @@
+{
+  "controller": { "baseUrl": "http://127.0.0.1:8080", "password": "opendoor" },
+  "dataDir": "./rainmaker-data",
+  "apiPort": 8787,
+  "allowedOrigins": [],
+  "location": null,
+  "warnings": { "rainForecast": true, "rainThresholdPct": 50, "recentRun": true, "recentRunWindowMin": 60 },
+  "plug": { "type": "none" },
+  "notifications": { "offline": true },
+  "zoneDefaults": {}
+}
