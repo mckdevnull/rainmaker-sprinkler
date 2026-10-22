@@ -1,3 +1,4 @@
+export * from './commands/commands.js';
 export * from './controller/client.js';
 export * from './controller/errors.js';
 export * from './controller/queue.js';
