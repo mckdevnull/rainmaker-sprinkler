@@ -25,12 +25,15 @@ const digest = (token: string): Buffer => createHash('sha256').update(token, 'ut
 
 /**
  * Device pairing and bearer-token auth. Paired devices are persisted under the JsonStore key
- * 'devices'. Emits 'code' ({code, expiresAt}) whenever a code is issued.
+ * 'devices'. Emits 'code' ({code, expiresAt}) whenever a code is issued, and 'revoked' (the
+ * device id, see `deviceId`) when a device is revoked.
  */
 export class Pairing extends EventEmitter {
   private devices: readonly StoredDevice[] = [];
   private trusted: readonly Buffer[] = [];
   private live: LiveCode | null = null;
+  /** Codes that expired unclaimed or were locked out by wrong guesses. */
+  private burned = 0;
   private saving: Promise<void> = Promise.resolve();
 
   constructor(
@@ -48,6 +51,7 @@ export class Pairing extends EventEmitter {
 
   /** Six digits, valid five minutes; replaces any live code. */
   startPairing(): { code: string; expiresAt: number } {
+    if (this.liveExpired()) this.burned += 1;
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const expiresAt = this.clock() + PAIRING_CODE_TTL_MS;
     this.live = { code, expiresAt, failures: 0 };
@@ -62,7 +66,9 @@ export class Pairing extends EventEmitter {
   claim(code: string, deviceName: string): { token: string } | null {
     if (typeof code !== 'string' || !CODE_PATTERN.test(code)) return null;
     const live = this.live;
-    if (!live || this.clock() >= live.expiresAt) {
+    if (!live) return null;
+    if (this.liveExpired()) {
+      this.burned += 1;
       this.live = null;
       return null;
     }
@@ -71,6 +77,7 @@ export class Pairing extends EventEmitter {
       live.failures += 1;
       if (live.failures >= MAX_FAILED_CLAIMS) {
         this.live = null;
+        this.burned += 1;
         this.logger.warn(`rainmaker: ${MAX_FAILED_CLAIMS} wrong pairing codes; start pairing again for a new code`);
       }
       return null;
@@ -88,7 +95,14 @@ export class Pairing extends EventEmitter {
 
   revoke(token: string): void {
     const found = this.find(token);
-    if (found) this.save(this.devices.filter((d) => d !== found));
+    if (!found) return;
+    this.save(this.devices.filter((d) => d !== found));
+    this.emit('revoked', found.hash);
+  }
+
+  /** How many codes expired unclaimed or were locked out (the live code counts once expired). */
+  burnedCodes(): number {
+    return this.burned + (this.liveExpired() ? 1 : 0);
   }
 
   list(): { name: string; createdAt: number }[] {
@@ -108,6 +122,10 @@ export class Pairing extends EventEmitter {
   /** Resolves once every device change so far is on disk; rejects if the last write failed. */
   flush(): Promise<void> {
     return this.saving;
+  }
+
+  private liveExpired(): boolean {
+    return this.live !== null && this.clock() >= this.live.expiresAt;
   }
 
   private find(token: string): StoredDevice | null {

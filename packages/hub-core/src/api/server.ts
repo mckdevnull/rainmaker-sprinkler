@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import type { Hub } from '../hub.js';
 import { ValidationError } from '../validate.js';
 import { HttpError, type ApiResponse } from './handlers/context.js';
-import { JSON_LIMIT_BYTES, matchRoute, PHOTO_LIMIT_BYTES, type Route } from './routes.js';
+import { RateLimiter } from './rateLimit.js';
+import { JSON_LIMIT_BYTES, matchRoute, PAIR_RATE_LIMIT, PHOTO_LIMIT_BYTES, type Route } from './routes.js';
 import { WsHub } from './ws.js';
 
 const MAX_TOKEN_LENGTH = 512;
@@ -48,6 +49,7 @@ export class ApiServer {
   private readonly server: Server;
   private readonly ws: WsHub;
   private readonly writeOrigins: ReadonlySet<string>;
+  private readonly pairLimiter = new RateLimiter(PAIR_RATE_LIMIT, 60_000);
 
   constructor(private readonly hub: Hub) {
     const controller = new URL(hub.config.controller.baseUrl);
@@ -105,6 +107,11 @@ export class ApiServer {
       return this.send(res, { status: 405, json: { error: 'method not allowed' } });
     }
     const { route, params } = match;
+    if (route.rateLimited && !this.pairLimiter.hit(req.socket.remoteAddress ?? 'unknown')) {
+      req.resume();
+      res.setHeader('Retry-After', String(this.pairLimiter.retryAfterSec));
+      return this.send(res, { status: 429, json: { error: 'too many requests' } });
+    }
     if (!route.public) {
       const token = bearer(req);
       if (!token || !this.hub.pairing.verify(token)) {

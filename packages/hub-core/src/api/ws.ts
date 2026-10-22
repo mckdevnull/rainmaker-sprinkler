@@ -18,7 +18,8 @@ type EventName = 'command' | 'offline' | 'online' | 'power-cycle' | 'recovery-ex
  */
 export class WsHub {
   private readonly wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
-  private readonly authed = new Set<WebSocket>();
+  /** Authenticated sockets and the device id they authenticated as (null for the CLI token). */
+  private readonly authed = new Map<WebSocket, string | null>();
   /** Serializes outgoing messages so state snapshots arrive in the order changes happened. */
   private chain: Promise<void> = Promise.resolve();
   private readonly unsubscribe: (() => void)[] = [];
@@ -30,6 +31,17 @@ export class WsHub {
     }
     for (const name of ['power-cycle', 'recovery-exhausted'] as const) {
       this.listen(hub.watchdog, name, (payload?: unknown) => this.broadcastEvent(name, payload));
+    }
+    this.listen(hub.pairing, 'revoked', (deviceId?: unknown) => this.closeRevoked(deviceId));
+  }
+
+  /** A revoked device loses its live sockets at once, not just its next request. */
+  private closeRevoked(deviceId: unknown): void {
+    for (const [ws, id] of this.authed) {
+      if (id !== null && id === deviceId) {
+        this.authed.delete(ws);
+        ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked');
+      }
     }
   }
 
@@ -64,27 +76,30 @@ export class WsHub {
     });
     ws.once('message', (data: RawData) => {
       clearTimeout(timer);
-      if (!this.isValidAuth(data)) return reject();
-      this.authed.add(ws);
+      const token = this.authToken(data);
+      if (token === null) return reject();
+      this.authed.set(ws, this.hub.pairing.deviceId(token));
       this.enqueue(async () => this.send(ws, { type: 'state', state: await buildState(this.hub) }));
     });
   }
 
-  private isValidAuth(data: RawData): boolean {
+  /** The verified token from an auth message, or null. */
+  private authToken(data: RawData): string | null {
     let msg: unknown;
     try {
       msg = JSON.parse(data.toString());
     } catch {
-      return false;
+      return null;
     }
-    return isRecord(msg) && msg.type === 'auth' && typeof msg.token === 'string' && this.hub.pairing.verify(msg.token);
+    if (!isRecord(msg) || msg.type !== 'auth' || typeof msg.token !== 'string') return null;
+    return this.hub.pairing.verify(msg.token) ? msg.token : null;
   }
 
   private broadcastState(): void {
     if (this.authed.size === 0) return;
     this.enqueue(async () => {
       const msg = { type: 'state', state: await buildState(this.hub) };
-      for (const ws of this.authed) this.send(ws, msg);
+      for (const ws of this.authed.keys()) this.send(ws, msg);
     });
   }
 
@@ -92,7 +107,7 @@ export class WsHub {
     if (this.authed.size === 0) return;
     const msg = { type: 'event', name, payload: payload ?? null };
     this.enqueue(async () => {
-      for (const ws of this.authed) this.send(ws, msg);
+      for (const ws of this.authed.keys()) this.send(ws, msg);
     });
   }
 

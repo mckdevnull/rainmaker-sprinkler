@@ -67,6 +67,8 @@ export interface Hub {
 const MQTT_MIN_FWV = 219;
 const HISTORY_REFRESH_MS = 15 * 60_000;
 const CLI_TOKEN_FILE = 'cli-token';
+/** Auto-issue stops after this many codes expired unclaimed or were locked out. */
+const MAX_AUTO_BURNED_CODES = 20;
 
 function mapError(err: unknown, online: boolean, logger: Logger): CommandError {
   if (err instanceof ControllerUnauthorized) return 'unauthorized';
@@ -111,6 +113,13 @@ export function createHub(config: HubConfig, deps: HubDeps = {}): Hub {
 
   const issuePairingCode = () => {
     if (pairing.list().length > 0) return;
+    if (pairing.burnedCodes() >= MAX_AUTO_BURNED_CODES) {
+      // Nobody is claiming them (or someone is guessing): stop until an owner asks or restarts.
+      if (pairingTimer) clearInterval(pairingTimer);
+      pairingTimer = null;
+      logger.log('Rainmaker pairing paused; run `rainmaker-hub pair` or restart to resume');
+      return;
+    }
     const { code } = pairing.startPairing();
     logger.log(`Rainmaker pairing code: ${code} (valid ${PAIRING_CODE_TTL_MS / 60_000} minutes)`);
   };
@@ -197,6 +206,7 @@ export function createHub(config: HubConfig, deps: HubDeps = {}): Hub {
       wireNotifications();
       server = new ApiServer(hub);
       await server.listen(config.apiPort, '0.0.0.0');
+      logger.log(`Rainmaker hub listening on ${server.port()}`);
       if (deps.mdns !== false) mdns = advertise(server.port(), { logger });
       issuePairingCode();
       pairingTimer = setInterval(issuePairingCode, PAIRING_CODE_TTL_MS);

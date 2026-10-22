@@ -22,10 +22,13 @@ export interface Route {
   body: BodyKind;
   /** No bearer token needed (only pairing itself). */
   public?: boolean;
+  /** Limited per client address (PAIR_RATE_LIMIT per minute); excess gets 429. */
+  rateLimited?: boolean;
 }
 
 export const JSON_LIMIT_BYTES = 64 * 1024;
 export const PHOTO_LIMIT_BYTES = 2 * 1024 * 1024;
+export const PAIR_RATE_LIMIT = 10;
 
 const r = (method: Method, path: string, handler: Handler, body: BodyKind = 'none', isPublic = false): Route => ({
   method,
@@ -52,7 +55,7 @@ export const ROUTES: readonly Route[] = [
   r('PUT', '/v1/settings', putSettings, 'json'),
   r('GET', '/v1/zones/:id/photo', getPhoto),
   r('PUT', '/v1/zones/:id/photo', putPhoto, 'jpeg'),
-  r('POST', '/v1/pair', pair, 'json', true),
+  { ...r('POST', '/v1/pair', pair, 'json', true), rateLimited: true },
   r('POST', '/v1/pairing/start', startPairing, 'json'),
   r('GET', '/v1/devices', listDevices),
   r('DELETE', '/v1/devices/:token', deleteDevice),

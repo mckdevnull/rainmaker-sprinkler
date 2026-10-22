@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 async function pairing(): Promise<Pairing> {
-  const p = new Pairing(new JsonStore(dir), clock);
+  const p = new Pairing(new JsonStore(dir), clock, { warn: vi.fn() });
   await p.load();
   made.push(p);
   return p;
@@ -111,6 +111,28 @@ describe('Pairing', () => {
     expect(p.claim(code, 'owner')).not.toBeNull();
   });
 
+  it('counts expired and locked-out codes as burned, and emits revoked', async () => {
+    const p = await pairing();
+    p.startPairing();
+    expect(p.burnedCodes()).toBe(0);
+    now += 5 * MIN;
+    expect(p.burnedCodes()).toBe(1); // the live code has expired
+    const { code } = p.startPairing();
+    expect(p.burnedCodes()).toBe(1);
+    const wrong = code === '000000' ? '000001' : '000000';
+    for (let i = 0; i < 5; i++) p.claim(wrong, 'guess');
+    expect(p.burnedCodes()).toBe(2);
+    p.startPairing();
+    p.startPairing(); // replacing a live, unexpired code does not burn it
+    expect(p.burnedCodes()).toBe(2);
+    const token = p.claim(p.startPairing().code, 'Phone')?.token ?? '';
+    const revoked: unknown[] = [];
+    p.on('revoked', (id) => revoked.push(id));
+    const id = p.deviceId(token);
+    p.revoke(token);
+    expect(revoked).toEqual([id]);
+  });
+
   it('persists hashed tokens and reloads them', async () => {
     const p = await pairing();
     const token = p.claim(p.startPairing().code, 'Phone')?.token ?? '';
@@ -165,6 +187,39 @@ describe('Pairing through the hub', () => {
     const { token } = await json(pair);
     expect(t.hub.pairing.verify(token)).toBe(true);
     expect((await fetch(`${t.url}/v1/pairing/start`, { method: 'POST' })).status).toBe(401);
+  });
+
+  it('auto-issue stops after 20 burned codes', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let clockNow = Date.now();
+    const t = await startHub({ pair: false, deps: { clock: () => clockNow } });
+    const lines = () => t.logger.log.mock.calls.map((c) => String(c[0]));
+    const codes = () => lines().filter((l) => l.includes('pairing code'));
+    for (let i = 0; i < 25; i++) {
+      clockNow += 5 * MIN;
+      vi.advanceTimersByTime(5 * MIN);
+    }
+    expect(codes()).toHaveLength(20);
+    const paused = lines().filter((l) => l.includes('pairing paused'));
+    expect(paused).toEqual(['Rainmaker pairing paused; run `rainmaker-hub pair` or restart to resume']);
+    const token = (await fs.readFile(path.join(t.dir, 'cli-token'), 'utf8')).trim();
+    const res = await fetch(`${t.url}/v1/pairing/start`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+  });
+
+  it('pair is rate limited per address', async () => {
+    const t = await startHub();
+    const attempt = () =>
+      fetch(`${t.url}/v1/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '123456', deviceName: 'x' }),
+      });
+    for (let i = 0; i < 10; i++) expect((await attempt()).status).not.toBe(429);
+    const limited = await attempt();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBeTruthy();
+    expect((await t.api('GET', '/v1/state')).status).toBe(200); // other routes unaffected
   });
 
   it('writes a 0600 cli-token on first start that authenticates', async () => {
