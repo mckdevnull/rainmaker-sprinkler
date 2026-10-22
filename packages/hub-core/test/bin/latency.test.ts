@@ -30,7 +30,7 @@ describe("rainmaker-latency", () => {
   it("fails (exit 1) when confirmed is ok:true but slower than the gate", async () => {
     const t = await startHub({ sim: { responseDelayMs: 150 } });
     const slowConfirm = (async (
-      input: RequestInfo | URL,
+      input: string | URL,
       init?: RequestInit,
     ) => {
       const res = await fetch(input, init);
