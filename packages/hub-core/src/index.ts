@@ -11,3 +11,5 @@ export * from './persist/jsonStore.js';
 export * from './history/history.js';
 export * from './weather/openMeteo.js';
 export * from './warnings/warnings.js';
+export * from './recovery/plug.js';
+export * from './recovery/watchdog.js';
