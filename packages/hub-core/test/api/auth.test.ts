@@ -1,9 +1,10 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Pairing } from '../../src/api/auth.js';
 import { JsonStore } from '../../src/persist/jsonStore.js';
+import { json, startHub, stopHubs } from './helpers.js';
 
 const MIN = 60_000;
 let dir: string;
@@ -83,12 +84,31 @@ describe('Pairing', () => {
     expect(p.claim(second.code, 'new')).not.toBeNull();
   });
 
-  it('invalidates the code after repeated wrong guesses', async () => {
-    const p = await pairing();
+  it('five wrong claims invalidate the code', async () => {
+    const warn = vi.fn();
+    const p = new Pairing(new JsonStore(dir), clock, { warn });
+    await p.load();
+    made.push(p);
     const { code } = p.startPairing();
     const wrong = code === '000000' ? '000001' : '000000';
-    for (let i = 0; i < 10; i++) expect(p.claim(wrong, 'guess')).toBeNull();
+    for (let i = 0; i < 4; i++) expect(p.claim(wrong, 'guess')).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+    expect(p.claim(wrong, 'guess')).toBeNull();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('wrong'));
     expect(p.claim(code, 'owner')).toBeNull();
+    const fresh = p.startPairing();
+    expect(p.claim(fresh.code, 'owner')).not.toBeNull();
+  });
+
+  it('claim rejects a non-digit code without throwing', async () => {
+    const p = await pairing();
+    const { code } = p.startPairing();
+    for (const bad of ['é1234', '１２３４５６', '12345', '1234567', 'abcdef', '', '12 456']) {
+      expect(() => p.claim(bad, 'x')).not.toThrow();
+      expect(p.claim(bad, 'x')).toBeNull();
+    }
+    // Malformed input does not count towards the brute-force limit.
+    expect(p.claim(code, 'owner')).not.toBeNull();
   });
 
   it('persists hashed tokens and reloads them', async () => {
@@ -107,5 +127,54 @@ describe('Pairing', () => {
     p.trust('cli-token-value-0123456789');
     expect(p.verify('cli-token-value-0123456789')).toBe(true);
     expect(p.list()).toEqual([]);
+  });
+});
+
+describe('Pairing through the hub', () => {
+  afterEach(async () => {
+    vi.useRealTimers();
+    await stopHubs();
+  });
+
+  it('hub start with no devices issues a code and re-issues after 5 min', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const t = await startHub({ pair: false });
+    const logged = () => t.logger.log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('pairing code'));
+    expect(logged()).toHaveLength(1);
+    expect(logged()[0]).toMatch(/\b\d{6}\b/);
+    vi.advanceTimersByTime(5 * MIN);
+    expect(logged()).toHaveLength(2);
+    t.hub.pairing.claim(t.hub.pairing.startPairing().code, 'Phone');
+    vi.advanceTimersByTime(5 * MIN);
+    expect(logged()).toHaveLength(2);
+  });
+
+  it('pairing/start route returns a claimable code', async () => {
+    const t = await startHub();
+    const res = await t.api('POST', '/v1/pairing/start');
+    expect(res.status).toBe(200);
+    const { code, expiresAt } = await json(res);
+    expect(code).toMatch(/^\d{6}$/);
+    expect(expiresAt).toBeGreaterThan(Date.now());
+    const pair = await fetch(`${t.url}/v1/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, deviceName: 'Second phone' }),
+    });
+    expect(pair.status).toBe(200);
+    const { token } = await json(pair);
+    expect(t.hub.pairing.verify(token)).toBe(true);
+    expect((await fetch(`${t.url}/v1/pairing/start`, { method: 'POST' })).status).toBe(401);
+  });
+
+  it('writes a 0600 cli-token on first start that authenticates', async () => {
+    const t = await startHub({ pair: false });
+    const file = path.join(t.dir, 'cli-token');
+    const stat = await fs.stat(file);
+    expect(stat.mode & 0o777).toBe(0o600);
+    const token = (await fs.readFile(file, 'utf8')).trim();
+    const res = await fetch(`${t.url}/v1/pairing/start`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    expect(t.hub.pairing.list()).toEqual([]);
   });
 });

@@ -4,7 +4,8 @@ import type { JsonStore } from '../persist/jsonStore.js';
 
 export const PAIRING_CODE_TTL_MS = 5 * 60_000;
 const STORE_KEY = 'devices';
-const MAX_FAILED_CLAIMS = 10;
+const MAX_FAILED_CLAIMS = 5;
+const CODE_PATTERN = /^\d{6}$/;
 
 interface StoredDevice {
   name: string;
@@ -35,6 +36,7 @@ export class Pairing extends EventEmitter {
   constructor(
     private readonly persist: JsonStore,
     private readonly clock: () => number = Date.now,
+    private readonly logger: Pick<Console, 'warn'> = console,
   ) {
     super();
   }
@@ -53,17 +55,24 @@ export class Pairing extends EventEmitter {
     return { code, expiresAt };
   }
 
-  /** Single use. Ten wrong guesses burn the live code. */
+  /**
+   * Single use. Anything but six ASCII digits is rejected before comparing (and does not count
+   * as a guess); five wrong guesses burn the live code until the next `startPairing()`.
+   */
   claim(code: string, deviceName: string): { token: string } | null {
+    if (typeof code !== 'string' || !CODE_PATTERN.test(code)) return null;
     const live = this.live;
     if (!live || this.clock() >= live.expiresAt) {
       this.live = null;
       return null;
     }
-    const ok = code.length === live.code.length && timingSafeEqual(Buffer.from(code), Buffer.from(live.code));
-    if (!ok) {
+    // Both are six ASCII digits here, so the buffers are six bytes each.
+    if (!timingSafeEqual(Buffer.from(code, 'ascii'), Buffer.from(live.code, 'ascii'))) {
       live.failures += 1;
-      if (live.failures >= MAX_FAILED_CLAIMS) this.live = null;
+      if (live.failures >= MAX_FAILED_CLAIMS) {
+        this.live = null;
+        this.logger.warn(`rainmaker: ${MAX_FAILED_CLAIMS} wrong pairing codes; start pairing again for a new code`);
+      }
       return null;
     }
     this.live = null;
