@@ -8,16 +8,20 @@ export interface Zone {
   remainingSec: number | null;
   lastRunAt: number | null;
 }
-export type ScheduleKind = 'weekly' | 'interval' | 'odd-days' | 'even-days';
+export type ScheduleKind = 'weekly' | 'biweekly' | 'monthly' | 'interval';
+export type OddEven = 'none' | 'odd' | 'even';
 export interface Schedule {
   id: number;
   name: string;
   enabled: boolean;
   weatherAdjust: boolean;
   kind: ScheduleKind;
+  oddEven: OddEven;
+  /** Bit 6: true = up to 4 fixed start times; false = repeating (start, count, every). */
+  fixedStartTimes: boolean;
   /** Weekly only (Mon..Sun); empty otherwise. */
   days: boolean[];
-  /** Up to 4 entries, unused (-1) entries removed. */
+  /** Fixed: entries >= 0. Repeating: [first start] only. */
   startMinutes: number[];
   zoneMinutes: Record<number, number>;
   pausedUntil: number | null;
@@ -40,21 +44,16 @@ export interface ControllerState {
 
 const FLAG_ENABLED = 1;
 const FLAG_WEATHER = 2;
-const FLAG_ODD_EVEN = 4;
-const FLAG_EVEN = 8;
-const FLAG_INTERVAL = 16;
-
-function kindOf(flag: number): ScheduleKind {
-  if (flag & FLAG_ODD_EVEN) return flag & FLAG_EVEN ? 'even-days' : 'odd-days';
-  if (flag & FLAG_INTERVAL) return 'interval';
-  return 'weekly';
-}
+const FLAG_FIXED_START = 64;
+const KINDS: ScheduleKind[] = ['weekly', 'biweekly', 'monthly', 'interval'];
+const ODD_EVEN: OddEven[] = ['none', 'odd', 'even', 'none'];
 
 const cloneProgram = (pd: ProgramData): ProgramData => [pd[0], pd[1], pd[2], [...pd[3]], [...pd[4]], pd[5]];
 
 export function programToSchedule(pid: number, pd: ProgramData): Schedule {
   const [flag, days0, , starts, durations, name] = pd;
-  const kind = kindOf(flag);
+  const kind = KINDS[(flag >> 4) & 3] ?? 'weekly';
+  const fixedStartTimes = (flag & FLAG_FIXED_START) !== 0;
   const zoneMinutes: Record<number, number> = {};
   durations.forEach((sec, sid) => {
     if (sec > 0) zoneMinutes[sid] = sec / 60;
@@ -65,8 +64,10 @@ export function programToSchedule(pid: number, pd: ProgramData): Schedule {
     enabled: (flag & FLAG_ENABLED) !== 0,
     weatherAdjust: (flag & FLAG_WEATHER) !== 0,
     kind,
+    oddEven: ODD_EVEN[(flag >> 2) & 3] ?? 'none',
+    fixedStartTimes,
     days: kind === 'weekly' ? Array.from({ length: 7 }, (_, i) => (days0 & (1 << i)) !== 0) : [],
-    startMinutes: starts.filter((m) => m >= 0),
+    startMinutes: fixedStartTimes ? starts.filter((m) => m >= 0) : starts.slice(0, 1).filter((m) => m >= 0),
     zoneMinutes,
     pausedUntil: null,
     raw: cloneProgram(pd),

@@ -1,6 +1,8 @@
 import { createSimulator, type Simulator } from '@rainmaker/controller-sim';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControllerClient } from '../../src/controller/client.js';
+import { ControllerUnreachable } from '../../src/controller/errors.js';
+import { PollSuperseded } from '../../src/controller/queue.js';
 import { Poller, type PollerOptions } from '../../src/state/poller.js';
 import { StateStore } from '../../src/state/store.js';
 
@@ -149,5 +151,70 @@ describe('Poller', () => {
     await poller.pollNow();
     expect(store.get().unauthorized).toBe(true);
     expect(store.get().online).toBe(true);
+  });
+
+  it('lastSeenAt does not cause change events', async () => {
+    const { poller, store } = await setup();
+    let changes = 0;
+    store.on('change', () => (changes += 1));
+    await poller.pollNow();
+    const first = changes;
+    expect(first).toBeGreaterThan(0);
+    const seen = store.get().lastSeenAt;
+    await new Promise((r) => setTimeout(r, 5));
+    await poller.pollNow();
+    await poller.pollNow();
+    expect(changes).toBe(first);
+    expect(store.get().lastSeenAt).toBeGreaterThan(seen ?? 0);
+  });
+
+  it('remainingSec changes while a zone runs still emit change', async () => {
+    const { poller, store, baseUrl } = await setup();
+    await run(baseUrl, 'sid=0&en=1&t=60');
+    await poller.pollNow();
+    let changes = 0;
+    store.on('change', () => (changes += 1));
+    sim?.tick(5000);
+    await poller.pollNow();
+    expect(changes).toBe(1);
+  });
+});
+
+describe('Poller failure counting', () => {
+  const jc = { devt: 0, en: 1, rd: 0, rdst: 0, sbits: [0, 0], ps: [], nbrd: 1, lrun: [0, 0, 0, 0] };
+  function scripted(outcomes: (Error | 'ok')[]) {
+    const queue = [...outcomes];
+    const client = {
+      getStatus: () => {
+        const o = queue.shift() ?? 'ok';
+        return o === 'ok' ? Promise.resolve(jc) : Promise.reject(o);
+      },
+      getStations: () => Promise.resolve({ sn: [0, 0], nstations: 2 }),
+      getNames: () => Promise.resolve({ snames: ['a', 'b'] }),
+      getPrograms: () => Promise.resolve({ nprogs: 0, pd: [] }),
+      getOptions: () => Promise.resolve({ fwv: 216, hwv: 22, nbrd: 1, ipas: 0, wl: 100, tz: 48 }),
+    } as unknown as ControllerClient;
+    const store = new StateStore();
+    return { poller: new Poller(client, store), store };
+  }
+  const down = () => new ControllerUnreachable('down');
+
+  it('goes offline on exactly the third consecutive failure', async () => {
+    const { poller, store } = scripted(['ok', down(), down(), down()]);
+    await poller.pollNow();
+    expect(store.get().online).toBe(true);
+    await poller.pollNow();
+    await poller.pollNow();
+    expect(store.get().online).toBe(true);
+    await poller.pollNow();
+    expect(store.get().online).toBe(false);
+  });
+
+  it('PollSuperseded does not count as a failure', async () => {
+    const { poller, store } = scripted(['ok', new PollSuperseded(), new PollSuperseded(), down(), down(), down()]);
+    for (let i = 0; i < 5; i += 1) await poller.pollNow();
+    expect(store.get().online).toBe(true);
+    await poller.pollNow();
+    expect(store.get().online).toBe(false);
   });
 });

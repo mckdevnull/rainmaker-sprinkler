@@ -19,6 +19,7 @@ export class Poller {
   private readonly opts: PollerOptions;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private generation = 0;
   private failures = 0;
   private names: string[] = [];
   private lastFullAt = 0;
@@ -36,11 +37,13 @@ export class Poller {
   start(): void {
     if (this.running) return;
     this.running = true;
-    void this.loop();
+    this.generation += 1;
+    void this.loop(this.generation);
   }
 
   stop(): void {
     this.running = false;
+    this.generation += 1;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
@@ -117,7 +120,7 @@ export class Poller {
       this.store.patch({ unauthorized: true });
       return;
     }
-    if (!(err instanceof ControllerUnreachable)) throw err;
+    if (!(err instanceof ControllerUnreachable)) console.error('rainmaker poller error', err);
     this.failures += 1;
     if (this.failures >= this.opts.offlineAfterFailures) {
       const zones = this.store.get().zones.map((z): Zone => ({ ...z, status: 'unknown', remainingSec: null }));
@@ -125,14 +128,14 @@ export class Poller {
     }
   }
 
-  private async loop(): Promise<void> {
+  private async loop(gen: number): Promise<void> {
     try {
       await this.pollNow();
     } catch (err) {
       console.error('rainmaker poller error', err);
     }
-    if (!this.running) return;
+    if (!this.running || gen !== this.generation) return;
     const busy = this.store.get().zones.some((z) => z.status === 'running' || z.status === 'queued');
-    this.timer = setTimeout(() => void this.loop(), busy ? this.opts.activeIntervalMs : this.opts.idleIntervalMs);
+    this.timer = setTimeout(() => void this.loop(gen), busy ? this.opts.activeIntervalMs : this.opts.idleIntervalMs);
   }
 }

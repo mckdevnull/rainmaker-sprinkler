@@ -15,9 +15,11 @@ export class StateStore extends EventEmitter {
 
   patch(p: Partial<ControllerState>): void {
     const next = { ...this.state, ...p };
-    if (isDeepStrictEqual(next, this.state)) return;
     const wasOnline = this.state.online;
+    const prev = this.state;
     this.state = next;
+    // lastSeenAt is kept current for readers but never counts as a change.
+    if (isDeepStrictEqual({ ...next, lastSeenAt: null }, { ...prev, lastSeenAt: null })) return;
     this.emit('change', next);
     if (next.online && !wasOnline) this.emit('online');
     else if (!next.online && wasOnline) this.emit('offline');
