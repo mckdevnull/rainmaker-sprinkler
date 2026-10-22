@@ -1,7 +1,7 @@
 import { createSimulator, type Simulator } from '@rainmaker/controller-sim';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ControllerClient } from '../../src/controller/client.js';
-import { ControllerUnreachable } from '../../src/controller/errors.js';
+import { ControllerUnauthorized, ControllerUnreachable } from '../../src/controller/errors.js';
 import { PollSuperseded } from '../../src/controller/queue.js';
 import { Poller, type PollerOptions } from '../../src/state/poller.js';
 import { StateStore } from '../../src/state/store.js';
@@ -208,6 +208,30 @@ describe('Poller failure counting', () => {
     expect(store.get().online).toBe(true);
     await poller.pollNow();
     expect(store.get().online).toBe(false);
+  });
+
+  it('emits offline once when the controller is offline from the very start', async () => {
+    const { poller, store } = scripted([down(), down(), down(), down(), down()]);
+    expect(store.get().online).toBeNull();
+    const offline: unknown[] = [];
+    store.on('offline', () => offline.push(store.get().online));
+    await poller.pollNow();
+    await poller.pollNow();
+    expect(store.get().online).toBeNull();
+    expect(offline).toHaveLength(0);
+    await poller.pollNow();
+    expect(store.get().online).toBe(false);
+    await poller.pollNow();
+    await poller.pollNow();
+    expect(offline).toEqual([false]); // the hub's offline notification listens to exactly this event
+  });
+
+  it('unauthorized never counts toward offline and leaves online unknown', async () => {
+    const denied = () => new ControllerUnauthorized('denied');
+    const { poller, store } = scripted([denied(), denied(), denied(), denied()]);
+    for (let i = 0; i < 4; i += 1) await poller.pollNow();
+    expect(store.get().online).toBeNull();
+    expect(store.get().unauthorized).toBe(true);
   });
 
   it('PollSuperseded does not count as a failure', async () => {

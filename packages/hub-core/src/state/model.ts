@@ -29,7 +29,8 @@ export interface Schedule {
   raw: ProgramData;
 }
 export interface ControllerState {
-  online: boolean;
+  /** null = unknown (no successful poll yet and not yet declared offline). */
+  online: boolean | null;
   unauthorized: boolean;
   lastSeenAt: number | null;
   /** Derived from devt each poll; 0 until the first poll. */
@@ -88,7 +89,7 @@ export function localToUtcMs(localSec: number, tzOffsetSec: number): number {
 }
 
 export const emptyState: ControllerState = {
-  online: false,
+  online: null,
   unauthorized: false,
   lastSeenAt: null,
   tzOffsetSec: 0,

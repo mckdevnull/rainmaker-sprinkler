@@ -49,6 +49,17 @@ describe('switches and sensors', () => {
     expect(state.value).toBe(C.ContactSensorState.CONTACT_DETECTED);
   });
 
+  it('online sensor reports detected while online is unknown (null)', async () => {
+    const r = await launch();
+    const state = r.api
+      .accessory('Sprinkler Controller Online')
+      .getService(S.ContactSensor)!
+      .getCharacteristic(C.ContactSensorState);
+    r.platform.hub!.store.patch({ online: null });
+    expect(await state.get()).toBe(C.ContactSensorState.CONTACT_DETECTED);
+    expect(state.value).toBe(C.ContactSensorState.CONTACT_DETECTED);
+  });
+
   it('Pairing switch issues a code', async () => {
     const r = await launch();
     const startPairing = vi.spyOn(r.platform.hub!.pairing, 'startPairing');

@@ -59,6 +59,16 @@ describe('Watchdog', () => {
     expect(plug.calls).toHaveLength(1);
   });
 
+  it('does not act on start() while online is unknown (null)', async () => {
+    store = new StateStore(); // fresh: online === null
+    make();
+    await vi.advanceTimersByTimeAsync(30 * MIN);
+    expect(plug.calls).toEqual([]);
+    store.patch({ online: false }); // null -> false is a real offline transition
+    await vi.advanceTimersByTimeAsync(0);
+    expect(plug.calls).toHaveLength(1);
+  });
+
   it('does not cycle again within 10 minutes', async () => {
     make();
     store.patch({ online: false });

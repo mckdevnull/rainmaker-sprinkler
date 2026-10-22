@@ -41,7 +41,8 @@ export class Watchdog extends EventEmitter {
     this.running = true;
     this.store.on('offline', this.onOffline);
     this.store.on('online', this.onOnline);
-    if (!this.store.get().online) this.attempt();
+    // Only a known-offline controller (never the unknown state before the first good poll).
+    if (this.store.get().online === false) this.attempt();
   }
 
   stop(): void {
@@ -60,7 +61,7 @@ export class Watchdog extends EventEmitter {
     this.clearTimer();
     this.timer = setTimeout(() => {
       this.timer = null;
-      if (this.running && !this.store.get().online) this.attempt();
+      if (this.running && this.store.get().online === false) this.attempt();
     }, ms);
   }
 

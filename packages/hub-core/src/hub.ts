@@ -71,10 +71,10 @@ const CLI_TOKEN_FILE = 'cli-token';
 /** Auto-issue stops after this many codes expired unclaimed or were locked out. */
 const MAX_AUTO_BURNED_CODES = 20;
 
-function mapError(err: unknown, online: boolean, logger: Logger): CommandError {
+function mapError(err: unknown, online: boolean | null, logger: Logger): CommandError {
   if (err instanceof ControllerUnauthorized) return 'unauthorized';
   if (err instanceof ControllerRejected) return 'rejected';
-  if (err instanceof ControllerUnreachable) return online ? 'timeout' : 'offline';
+  if (err instanceof ControllerUnreachable) return online === false ? 'offline' : 'timeout';
   logger.error('rainmaker: controller error', err);
   return 'timeout';
 }
