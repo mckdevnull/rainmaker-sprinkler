@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { handle } from './handlers.js';
+import { EMPTY_404, handle } from './handlers.js';
 import { advance, createState, makeStations, type SimState } from './state.js';
 
 export type { LogEntry, SimProgram, SimState } from './state.js';
@@ -16,6 +16,8 @@ export interface SimOptions {
   responseDelayMs: number;
   tzOffsetSec: number;
   dropCommands: boolean;
+  /** False mimics a board without an SD card: /jl answers 404 with an empty body. */
+  hasLog: boolean;
   clock?: () => number;
 }
 
@@ -41,6 +43,7 @@ const DEFAULTS = {
   responseDelayMs: 150,
   tzOffsetSec: -21600,
   dropCommands: false,
+  hasLog: true,
 } satisfies Omit<SimOptions, 'clock'>;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -56,15 +59,26 @@ export function createSimulator(overrides: Partial<SimOptions> = {}): Simulator 
   // One request at a time, like the AVR: each request waits for the previous response.
   let queue: Promise<void> = Promise.resolve();
 
-  const serve = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-    const finished = new Promise<void>((resolve) => res.once('close', resolve));
+  const serve = async (req: IncomingMessage, res: ServerResponse, closed: Promise<void>): Promise<void> => {
+    if (res.destroyed) return; // client went away while queued
     await sleep(opts.responseDelayMs);
+    if (res.destroyed) return;
     advance(state, now());
     const url = new URL(req.url ?? '/', 'http://controller');
-    const body = JSON.stringify(handle(url.pathname, url.searchParams, state, opts));
-    res.writeHead(200, { 'Content-Type': 'application/json', Connection: 'close' });
+    let status = 200;
+    let body = '';
+    try {
+      const result = handle(url.pathname, url.searchParams, state, opts);
+      if (result === EMPTY_404) status = 404;
+      else body = JSON.stringify(result);
+    } catch (err) {
+      console.error('controller-sim handler error', err);
+      status = 500;
+      body = '{"result":0}';
+    }
+    res.writeHead(status, { 'Content-Type': 'application/json', Connection: 'close' });
     res.end(body);
-    await finished;
+    await closed;
   };
 
   const sim: Simulator = {
@@ -73,7 +87,9 @@ export function createSimulator(overrides: Partial<SimOptions> = {}): Simulator 
     async listen(requested = 0) {
       server = createServer((req, res) => {
         sim.requestCount += 1;
-        queue = queue.then(() => serve(req, res)).catch(() => undefined);
+        // Register before queueing so an abort while waiting is never missed.
+        const closed = new Promise<void>((resolve) => res.once('close', resolve));
+        queue = queue.then(() => serve(req, res, closed)).catch(() => undefined);
       });
       await new Promise<void>((resolve, reject) => {
         server?.once('error', reject);

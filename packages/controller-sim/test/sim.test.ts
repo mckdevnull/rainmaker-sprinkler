@@ -122,4 +122,66 @@ describe('controller simulator', () => {
     const flag = (await json(`/jp?pw=${PW}`)).pd[0][0];
     expect(flag & 1).toBe(0);
   });
+
+  describe('/jl', () => {
+    const runOne = async (ctx: Awaited<ReturnType<typeof start>>) => {
+      await ctx.json(`/cm?pw=${PW}&sid=0&en=1&t=60`);
+      ctx.sim.tick(60_000);
+      return Math.floor((T0 + 60_000) / 1000) - 21600;
+    };
+
+    it('jl filters by local-second range', async () => {
+      const ctx = await start({ tzOffsetSec: -21600 });
+      const endLocal = await runOne(ctx);
+      expect(await ctx.json(`/jl?pw=${PW}&start=${endLocal - 10}&end=${endLocal + 10}`)).toEqual([[99, 0, 60, endLocal]]);
+      expect(await ctx.json(`/jl?pw=${PW}&start=${endLocal + 86400}&end=${endLocal + 2 * 86400}`)).toEqual([]);
+      expect(await ctx.json(`/jl?pw=${PW}`)).toEqual({ result: 16 });
+    });
+
+    it('jl hist returns past N days', async () => {
+      const ctx = await start({ tzOffsetSec: -21600 });
+      const endLocal = await runOne(ctx);
+      ctx.sim.tick(3 * 86400 * 1000);
+      expect(await ctx.json(`/jl?pw=${PW}&hist=3`)).toEqual([[99, 0, 60, endLocal]]);
+      expect(await ctx.json(`/jl?pw=${PW}&hist=2`)).toEqual([]);
+      expect(await ctx.json(`/jl?pw=${PW}&hist=366`)).toEqual({ result: 17 });
+    });
+
+    it('jl returns 404 when hasLog is false', async () => {
+      const { get } = await start({ hasLog: false });
+      expect(await get(`/jl?pw=${PW}&hist=1`)).toEqual({ status: 404, text: '' });
+    });
+  });
+
+  describe('single-client queue robustness', () => {
+    it('serves later requests after a queued client aborts', async () => {
+      const { baseUrl } = await start({ responseDelayMs: 150 });
+      const first = fetch(`${baseUrl}/js?pw=${PW}`).then((r) => r.text());
+      const ac = new AbortController();
+      const queued = fetch(`${baseUrl}/js?pw=${PW}`, { signal: ac.signal });
+      queued.catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 40));
+      ac.abort();
+      await first;
+      const res = await fetch(`${baseUrl}/js?pw=${PW}`, { signal: AbortSignal.timeout(2000) });
+      expect(res.status).toBe(200);
+    });
+
+    it('serves a new request after offline with queued requests, then online', async () => {
+      const { sim, baseUrl } = await start({ responseDelayMs: 150 });
+      const inflight = [1, 2, 3].map(() => fetch(`${baseUrl}/js?pw=${PW}`).then((r) => r.text(), () => 'dropped'));
+      await new Promise((r) => setTimeout(r, 40));
+      sim.setOffline(true);
+      await Promise.all(inflight);
+      sim.setOffline(false);
+      let status = 0;
+      for (let attempt = 0; attempt < 3 && status !== 200; attempt++) {
+        status = await fetch(`${baseUrl}/js?pw=${PW}`, { signal: AbortSignal.timeout(1000) }).then(
+          (r) => r.status,
+          () => 0,
+        );
+      }
+      expect(status).toBe(200);
+    }, 10_000);
+  });
 });

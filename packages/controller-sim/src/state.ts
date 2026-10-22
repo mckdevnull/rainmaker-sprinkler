@@ -1,4 +1,4 @@
-/** Station id used by the firmware for manually started runs. */
+/** Program id the firmware reports for manually started runs. */
 export const MANUAL_PID = 99;
 
 export interface SimProgram {

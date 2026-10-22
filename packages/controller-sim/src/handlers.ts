@@ -10,6 +10,10 @@ const RESULT_DATA_FORMAT = { result: 18 };
 const RESULT_NOT_FOUND = { result: 32 };
 
 const MAX_MANUAL_SEC = 64800;
+const MAX_LOG_DAYS = 365;
+
+/** Sentinel: respond HTTP 404 with an empty body (firmware without an SD card, on /jl). */
+export const EMPTY_404 = Symbol('empty-404');
 
 const md5 = (s: string) => createHash('md5').update(s).digest('hex');
 
@@ -83,14 +87,28 @@ const jp = (state: SimState) => ({
 });
 
 function jl(query: URLSearchParams, state: SimState, opts: SimOptions) {
-  const start = intParam(query, 'start');
-  const end = intParam(query, 'end');
-  if (start === null || end === null) return RESULT_DATA_MISSING;
+  if (!opts.hasLog) return EMPTY_404;
+  const nowLocal = localSec(state, opts, state.lastMs);
+  const hist = intParam(query, 'hist');
+  let startDay: number;
+  let endDay: number;
+  if (hist !== null) {
+    if (hist < 0 || hist > MAX_LOG_DAYS) return RESULT_OUT_OF_RANGE;
+    endDay = Math.floor(nowLocal / 86400);
+    startDay = endDay - hist;
+  } else {
+    const start = intParam(query, 'start');
+    const end = intParam(query, 'end');
+    if (start === null || end === null) return RESULT_DATA_MISSING;
+    startDay = Math.floor(start / 86400);
+    endDay = Math.floor(end / 86400);
+    if (endDay < startDay || endDay - startDay > MAX_LOG_DAYS) return RESULT_OUT_OF_RANGE;
+  }
   return state.log
     .map((e) => ({ e, endLocal: localSec(state, opts, e.endMs) }))
     .filter(({ endLocal }) => {
       const day = Math.floor(endLocal / 86400);
-      return day >= start && day <= end;
+      return day >= startDay && day <= endDay;
     })
     .map(({ e, endLocal }) => [e.pid, e.sid, e.durSec, endLocal]);
 }
