@@ -16,13 +16,29 @@ let sim: Simulator | undefined;
 let dir: string;
 const services: PauseService[] = [];
 
-async function setup() {
+class FlakyStore extends JsonStore {
+  failNextSet = false;
+  override async set<T>(key: string, value: T): Promise<void> {
+    if (this.failNextSet) {
+      this.failNextSet = false;
+      throw new Error('disk full');
+    }
+    return super.set(key, value);
+  }
+}
+
+/** Real-time poll for a condition (vitest's waitFor would drive the faked interval). */
+async function eventually(pred: () => boolean): Promise<void> {
+  for (let i = 0; i < 100 && !pred(); i++) await new Promise((r) => setTimeout(r, 20));
+  expect(pred()).toBe(true);
+}
+
+async function setup(persist: JsonStore = new JsonStore(dir)) {
   sim = createSimulator({ password: PASSWORD, passwordMode: 'plain', responseDelayMs: 1, clock: () => Date.now() });
   const { baseUrl } = await sim.listen(0);
   const client = new ControllerClient({ baseUrl, password: PASSWORD, timeoutMs: 3000 });
   const store = new StateStore();
   const poller = new Poller(client, store);
-  const persist = new JsonStore(dir);
   await poller.pollNow();
   const make = () => {
     const svc = new PauseService(client, store, persist, () => Date.now());
@@ -104,11 +120,11 @@ describe('PauseService schedule pause', () => {
     expect(svc.describe().schedules).toEqual({ 0: until });
     svc.stop();
 
+    jump(3 * DAY + 1000);
     const second = make();
     second.start();
-    jump(3 * DAY + 1000);
+    await eventually(() => ((sim.state.programs[0]?.flag ?? 0) & 1) === 1);
     await second.checkNow();
-    expect((sim.state.programs[0]?.flag ?? 0) & 1).toBe(1);
     expect(second.describe().schedules).toEqual({});
   });
 
@@ -158,8 +174,58 @@ describe('PauseService schedule pause', () => {
     sim.setOffline(false);
     const second = make();
     second.start();
+    await eventually(() => ((sim.state.programs[0]?.flag ?? 0) & 1) === 1);
     await second.checkNow();
-    expect((sim.state.programs[0]?.flag ?? 0) & 1).toBe(1);
     expect(second.describe().schedules).toEqual({});
+  });
+
+  it('the 60 s timer retries a failed re-enable', async () => {
+    const { svc, sim } = await setup();
+    await svc.pauseSchedule(0, Date.now() + DAY);
+    svc.start();
+    sim.setOffline(true);
+    jump(DAY + 1000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(svc.describe().schedules).toHaveProperty('0');
+    sim.setOffline(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await eventually(() => ((sim.state.programs[0]?.flag ?? 0) & 1) === 1);
+    await svc.checkNow();
+    expect(svc.describe().schedules).toEqual({});
+  });
+
+  it('survives a persist failure: the job remains and the next check succeeds', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const flaky = new FlakyStore(dir);
+    const { svc, sim } = await setup(flaky);
+    await svc.pauseSchedule(0, Date.now() + DAY);
+    jump(DAY + 1000);
+    flaky.failNextSet = true;
+    await expect(svc.checkNow()).resolves.toBeUndefined();
+    expect(svc.describe().schedules).toHaveProperty('0');
+    await svc.checkNow();
+    expect(svc.describe().schedules).toEqual({});
+    expect((sim.state.programs[0]?.flag ?? 0) & 1).toBe(1);
+  });
+
+  it('pauseSchedule reports rejected, not a throw, when persisting fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const flaky = new FlakyStore(dir);
+    const { svc, sim } = await setup(flaky);
+    flaky.failNextSet = true;
+    expect(await svc.pauseSchedule(0, Date.now() + DAY)).toEqual({ ok: false, error: 'rejected' });
+    expect((sim.state.programs[0]?.flag ?? 0) & 1).toBe(1);
+    expect(svc.describe().schedules).toEqual({});
+  });
+
+  it('resumeSchedule without a job is a no-op, and drops an orphaned job', async () => {
+    const { svc, sim, store } = await setup();
+    const flagBefore = sim.state.programs[0]?.flag;
+    expect(await svc.resumeSchedule(0)).toEqual({ ok: true, confirmedInMs: 0 });
+    expect(sim.state.programs[0]?.flag).toBe(flagBefore);
+    await svc.pauseSchedule(0, Date.now() + DAY);
+    store.patch({ schedules: [] }); // schedule vanished from the controller
+    expect((await svc.resumeSchedule(0)).ok).toBe(false);
+    expect(svc.describe().schedules).toEqual({});
   });
 });

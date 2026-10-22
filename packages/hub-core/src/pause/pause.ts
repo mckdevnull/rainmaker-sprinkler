@@ -17,7 +17,7 @@ const MAX_RAIN_DELAY_HOURS = 32767;
 const HOUR_MS = 3600e3;
 const CHECK_INTERVAL_MS = 60_000;
 /** Re-apply this long before the controller's delay is due to end. */
-const REAPPLY_LEAD_MS = 60_000;
+const REAPPLY_LEAD_MS = 5 * 60_000;
 /** A controller delay this far from the one the hub applied was set by someone else. */
 const FOREIGN_DELAY_TOLERANCE_MS = 90_000;
 const PAUSE_KEY = 'pause';
@@ -36,7 +36,7 @@ export class PauseService {
   private chain: Promise<unknown> = Promise.resolve();
   private timer: NodeJS.Timeout | null = null;
   private readonly onChange = (s: ControllerState): void => this.observe(s);
-  private readonly onOnline = (): void => void this.checkNow();
+  private readonly onOnline = (): void => this.safeCheck();
 
   constructor(
     private readonly client: ControllerClient,
@@ -49,9 +49,9 @@ export class PauseService {
     if (this.timer) return;
     this.store.on('change', this.onChange);
     this.store.on('online', this.onOnline);
-    this.timer = setInterval(() => void this.checkNow(), CHECK_INTERVAL_MS);
+    this.timer = setInterval(() => this.safeCheck(), CHECK_INTERVAL_MS);
     this.timer.unref();
-    void this.checkNow();
+    this.safeCheck();
   }
 
   stop(): void {
@@ -67,6 +67,10 @@ export class PauseService {
         ? { owner: 'weather', until: this.appliedUntil, appliedHours: 0 }
         : null;
     return { all: this.record ?? weather, schedules: { ...this.jobs } };
+  }
+
+  private safeCheck(): void {
+    this.checkNow().catch((err: unknown) => console.error('rainmaker pause check failed', err));
   }
 
   /** Run one re-apply / re-enable pass now (the timer and 'online' do the same). */
@@ -101,7 +105,7 @@ export class PauseService {
       this.appliedUntil = 0;
       this.weather = false;
       this.store.patch({ rainDelayUntil: null });
-      await this.persist.set(PAUSE_KEY, null);
+      if (!(await this.saveRecord(null))) return { ok: false, error: 'rejected' };
       return { ok: true, confirmedInMs: Date.now() - start };
     });
   }
@@ -112,13 +116,15 @@ export class PauseService {
       const s = this.schedule(id);
       if (!s || !Number.isFinite(untilMs) || untilMs <= this.clock()) return { ok: false, error: 'rejected' };
       const start = Date.now();
+      // Persist the job first: a disabled program must never exist without its re-enable job.
+      const withJob = { ...this.jobs, [id]: untilMs };
+      if (!(await this.saveJobs(withJob))) return { ok: false, error: 'rejected' };
       try {
         await this.client.setProgram(id, scheduleToProgram({ ...s, enabled: false }), { deadlineMs: COMMAND_DEADLINE_MS });
       } catch (err) {
+        await this.saveJobs(this.without(id));
         return { ok: false, error: this.mapError(err) };
       }
-      this.jobs = { ...this.jobs, [id]: untilMs };
-      await this.persist.set(JOBS_KEY, this.jobs);
       this.patchSchedule(id, { enabled: false, pausedUntil: untilMs });
       return { ok: true, confirmedInMs: Date.now() - start };
     });
@@ -127,8 +133,9 @@ export class PauseService {
   resumeSchedule(id: number): Promise<CommandResult> {
     return this.locked(async () => {
       await this.ensureLoaded();
+      if (!(id in this.jobs)) return { ok: true, confirmedInMs: 0 };
       const start = Date.now();
-      const failure = await this.reenable(id);
+      const failure = await this.reenable(id, true);
       return failure ? { ok: false, error: failure } : { ok: true, confirmedInMs: Date.now() - start };
     });
   }
@@ -151,9 +158,14 @@ export class PauseService {
 
   private ensureLoaded(): Promise<void> {
     this.loaded ??= (async () => {
-      this.record = await this.persist.get<PauseRecord | null>(PAUSE_KEY, null);
-      this.jobs = await this.persist.get<Jobs>(JOBS_KEY, {});
-    })();
+      const record = await this.persist.get<PauseRecord | null>(PAUSE_KEY, null);
+      const jobs = await this.persist.get<Jobs>(JOBS_KEY, {});
+      this.record = record;
+      this.jobs = jobs;
+    })().catch((err: unknown) => {
+      this.loaded = null; // a transient read error must not disable the service for good
+      throw err;
+    });
     return this.loaded;
   }
 
@@ -172,7 +184,7 @@ export class PauseService {
     this.weather = false;
     this.record = { ...want, appliedHours: hours };
     this.store.patch({ rainDelayUntil: end });
-    await this.persist.set(PAUSE_KEY, this.record);
+    if (!(await this.saveRecord(this.record))) return { ok: false, error: 'rejected' };
     return { ok: true, confirmedInMs: Date.now() - start };
   }
 
@@ -181,8 +193,7 @@ export class PauseService {
     if (!rec) return;
     if (rec.until <= now) {
       // The controller's own delay runs out by itself.
-      this.record = null;
-      await this.persist.set(PAUSE_KEY, null);
+      if (await this.saveRecord(null)) this.record = null;
       return;
     }
     const end = this.appliedUntil ?? this.store.get().rainDelayUntil ?? 0;
@@ -195,19 +206,50 @@ export class PauseService {
     }
   }
 
-  /** Returns null on success (job removed), otherwise the error; the job stays persisted. */
-  private async reenable(id: number): Promise<CommandError | null> {
+  /**
+   * Returns null on success, otherwise the error. The job is removed on success, or always when `drop`
+   * (explicit resume); otherwise it stays persisted for the next retry.
+   */
+  private async reenable(id: number, drop = false): Promise<CommandError | null> {
     const s = this.schedule(id);
-    if (!s) return 'rejected';
-    try {
-      await this.client.setProgram(id, scheduleToProgram({ ...s, enabled: true }), { deadlineMs: COMMAND_DEADLINE_MS });
-    } catch (err) {
-      return this.mapError(err);
+    let failure: CommandError | null = s ? null : 'rejected';
+    if (s) {
+      try {
+        await this.client.setProgram(id, scheduleToProgram({ ...s, enabled: true }), { deadlineMs: COMMAND_DEADLINE_MS });
+      } catch (err) {
+        failure = this.mapError(err);
+      }
     }
-    this.jobs = Object.fromEntries(Object.entries(this.jobs).filter(([key]) => Number(key) !== id));
-    await this.persist.set(JOBS_KEY, this.jobs);
-    this.patchSchedule(id, { enabled: true, pausedUntil: null });
-    return null;
+    if (failure && !drop) return failure;
+    if (!(await this.saveJobs(this.without(id)))) return failure ?? 'rejected';
+    if (!failure) this.patchSchedule(id, { enabled: true, pausedUntil: null });
+    return failure;
+  }
+
+  private without(id: number): Jobs {
+    return Object.fromEntries(Object.entries(this.jobs).filter(([key]) => Number(key) !== id));
+  }
+
+  /** Persist then adopt in memory; on a disk error memory is left unchanged so the work is retried. */
+  private async saveJobs(next: Jobs): Promise<boolean> {
+    try {
+      await this.persist.set(JOBS_KEY, next);
+    } catch (err) {
+      console.error('rainmaker pause: could not persist schedule jobs', err);
+      return false;
+    }
+    this.jobs = next;
+    return true;
+  }
+
+  private async saveRecord(next: PauseRecord | null): Promise<boolean> {
+    try {
+      await this.persist.set(PAUSE_KEY, next);
+      return true;
+    } catch (err) {
+      console.error('rainmaker pause: could not persist pause record', err);
+      return false;
+    }
   }
 
   /** Owner detection and pausedUntil annotation on every state change. */
