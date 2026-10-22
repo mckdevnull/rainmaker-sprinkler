@@ -8,3 +8,6 @@ export * from './state/poller.js';
 export * from './state/store.js';
 export * from './pause/pause.js';
 export * from './persist/jsonStore.js';
+export * from './history/history.js';
+export * from './weather/openMeteo.js';
+export * from './warnings/warnings.js';
