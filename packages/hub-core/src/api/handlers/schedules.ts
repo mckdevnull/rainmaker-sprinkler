@@ -12,9 +12,10 @@ import {
   reqString,
   ValidationError,
 } from '../../validate.js';
-import { commandResponse, ok, scheduleId, type Handler } from './context.js';
+import { commandResponse, HttpError, ok, scheduleId, type Handler } from './context.js';
 
-const MAX_DELAY_MS = 32767 * 3600e3;
+/** A sanity bound only: pauses longer than the controller's 32767 h delay are re-applied by the hub. */
+const MAX_PAUSE_MS = 10 * 365.25 * 24 * 3600e3;
 const MAX_STARTS = 4;
 const MINUTES_PER_DAY = 1440;
 const MAX_PROGRAM_NAME = 32;
@@ -27,7 +28,7 @@ function parseUntil(body: unknown): number {
   const until = reqNumber(reqObject(body, 'body').until, 'until', 0, Number.MAX_SAFE_INTEGER);
   const now = Date.now();
   if (until <= now) throw new ValidationError('until', 'must be in the future');
-  if (until > now + MAX_DELAY_MS) throw new ValidationError('until', 'is more than 32767 hours ahead');
+  if (until > now + MAX_PAUSE_MS) throw new ValidationError('until', 'is more than 10 years ahead');
   return until;
 }
 
@@ -111,6 +112,11 @@ export const putSchedule: Handler = async (hub: Hub, req) => {
   const { schedules, zones } = hub.store.get();
   const s = schedules[id] as Schedule;
   const data = scheduleBodyToProgram(req.body, s, zones.length || s.raw[4].length);
+  // A paused schedule's enable bit belongs to its pending re-enable job; changing it here would be undone.
+  const enabled = (data[0] & FLAG_ENABLED) !== 0;
+  if (id in hub.pause.describe().schedules && enabled !== s.enabled) {
+    throw new HttpError(409, 'schedule is paused; resume it first');
+  }
   const result = await hub.updateSchedule(id, data);
   if (!result.ok) return commandResponse(result);
   return ok(hub.store.get().schedules[id]);

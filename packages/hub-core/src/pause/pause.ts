@@ -120,6 +120,11 @@ export class PauseService {
       await this.ensureLoaded();
       const s = this.schedule(id);
       if (!s || !Number.isFinite(untilMs) || untilMs <= this.clock()) return { ok: false, error: 'rejected' };
+      if (!s.enabled && !(id in this.jobs)) {
+        // Pausing would re-enable it when the pause ends: a disabled schedule cannot be paused.
+        console.warn(`rainmaker pause: schedule ${id} is already disabled; not pausing it`);
+        return { ok: false, error: 'rejected' };
+      }
       const start = Date.now();
       // Persist the job first: a disabled program must never exist without its re-enable job.
       const prev = this.jobs[id];

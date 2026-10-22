@@ -128,6 +128,22 @@ describe('PauseService schedule pause', () => {
     expect(second.describe().schedules).toEqual({});
   });
 
+  it('pauseSchedule rejects an already-disabled schedule and stores no re-enable job', async () => {
+    const { svc, sim, store } = await setup();
+    const program = sim.state.programs[0];
+    if (!program) throw new Error('no program');
+    store.patch({ schedules: store.get().schedules.map((s) => ({ ...s, enabled: false })) });
+    program.flag &= ~1;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const requests = sim.requestCount;
+    expect(await svc.pauseSchedule(0, Date.now() + DAY)).toEqual({ ok: false, error: 'rejected' });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('already disabled'));
+    expect(sim.requestCount).toBe(requests); // no setProgram
+    expect(svc.describe().schedules).toEqual({});
+    expect(store.get().schedules[0]?.pausedUntil).toBeNull();
+    warn.mockRestore();
+  });
+
   it('pauseSchedule changes only the enable bit and keeps the name', async () => {
     const { svc, sim, poller } = await setup();
     const program = sim.state.programs[0];

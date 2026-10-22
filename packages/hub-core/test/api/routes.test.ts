@@ -70,6 +70,33 @@ describe('routes', () => {
     expect((await json(await t.api('GET', '/v1/state'))).rainDelayUntil).toBeNull();
   });
 
+  it('pause-all 5 years ahead is accepted and capped on the controller', async () => {
+    const t = await startHub();
+    const until = Date.now() + 5 * 365 * 24 * HOUR;
+    const res = await t.api('POST', '/v1/pause', { until });
+    expect(res.status).toBe(200);
+    const s = await json(await t.api('GET', '/v1/state'));
+    expect(Math.abs(s.rainDelayUntil - (Date.now() + 32767 * HOUR))).toBeLessThan(5 * 60_000);
+    expect(s.pause.all).toMatchObject({ owner: 'user', until });
+    const tooFar = await t.api('POST', '/v1/schedules/0/pause', { until: Date.now() + 11 * 366 * 24 * HOUR });
+    expect(tooFar.status).toBe(400);
+    expect((await t.api('POST', '/v1/schedules/0/pause', { until })).status).toBe(200);
+  });
+
+  it('PUT schedule that changes enabled while paused answers 409', async () => {
+    const t = await startHub();
+    expect((await t.api('POST', '/v1/schedules/0/pause', { until: Date.now() + 2 * HOUR })).status).toBe(200);
+    const [s0] = await json(await t.api('GET', '/v1/schedules'));
+    expect(s0.enabled).toBe(false);
+    const res = await t.api('PUT', '/v1/schedules/0', { ...s0, enabled: true });
+    expect(res.status).toBe(409);
+    expect(await json(res)).toEqual({ error: 'schedule is paused; resume it first' });
+    expect((t.sim.state.programs[0]?.flag ?? -1) & 1).toBe(0);
+    // Other edits keep working while paused.
+    expect((await t.api('PUT', '/v1/schedules/0', { ...s0, name: 'Renamed' })).status).toBe(200);
+    expect(t.sim.state.programs[0]?.name).toBe('Renamed');
+  });
+
   it('PUT schedule updates the simulator program', async () => {
     const t = await startHub();
     const [s0] = await json(await t.api('GET', '/v1/schedules'));
