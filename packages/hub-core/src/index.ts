@@ -6,3 +6,5 @@ export * from './controller/types.js';
 export * from './state/model.js';
 export * from './state/poller.js';
 export * from './state/store.js';
+export * from './pause/pause.js';
+export * from './persist/jsonStore.js';
