@@ -29,6 +29,15 @@ export async function plugGet(fetchImpl: typeof fetch, url: string): Promise<voi
   if (!res.ok) throw new Error(`smart plug request failed: HTTP ${res.status} for ${url}`);
 }
 
+/** The belt-and-braces "on" after the device's own timer: a failure is logged, never thrown. */
+export async function turnOnQuietly(fetchImpl: typeof fetch, url: string): Promise<void> {
+  try {
+    await plugGet(fetchImpl, url);
+  } catch (err) {
+    console.warn('rainmaker: smart plug "on" request failed; the plug\'s own timer turns it back on', err);
+  }
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -14,8 +14,10 @@ The hub calls the plug on your home network. It needs no Home app automation.
 
 Supported plugs:
 
-- **Shelly Gen1.** The hub calls `http://<host>/relay/0?turn=off`, waits 30 seconds, then calls `http://<host>/relay/0?turn=on`.
-- **Tasmota.** The hub calls `http://<host>/cm?cmnd=Power%20Off`, waits 30 seconds, then calls `http://<host>/cm?cmnd=Power%20On`.
+- **Shelly Gen1.** The hub calls `http://<host>/relay/0?turn=off&timer=30`, which turns the plug off and makes the plug itself turn back on after 30 seconds. After 30 seconds the hub also calls `http://<host>/relay/0?turn=on`.
+- **Tasmota.** The hub calls `http://<host>/cm?cmnd=Backlog%20Power%20Off%3B%20Delay%20300%3B%20Power%20On` (Power Off, wait 30 seconds, Power On, all run by the plug). After 30 seconds the hub also calls `http://<host>/cm?cmnd=Power%20On`.
+
+Because the plug runs its own timer, it turns the controller back on even if the hub stops or loses the network in the middle of a power cycle.
 
 Steps:
 
@@ -61,7 +63,7 @@ Use this with any HomeKit plug, including one bridged from another hub. The plug
 
 For this option, the rate limits above (one cycle per 10 minutes, three per hour, the `recovery-exhausted` notification) do not apply. The hub does not power cycle anything itself. The automation runs each time the sensor opens. If the controller stays offline, the sensor stays open, so the automation does not fire again until it closes and opens again.
 
-The hub still sends the normal offline and back-online notifications (see **Owner notifications** in [install-hub.md](install-hub.md)).
+The hub still sends the normal offline and back-online notifications (see [Notifications in install-hub.md](install-hub.md#notifications)).
 
 ## Notifications for both options
 

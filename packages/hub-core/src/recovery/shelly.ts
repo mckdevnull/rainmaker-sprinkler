@@ -1,6 +1,9 @@
-import { plugGet, sleep, type SmartPlug } from './plug.js';
+import { plugGet, sleep, turnOnQuietly, type SmartPlug } from './plug.js';
 
-/** Shelly Gen1: GET /relay/0?turn=off|on */
+/**
+ * Shelly Gen1: GET /relay/0?turn=off&timer=<s> makes the plug switch itself back on after <s>
+ * seconds, even if the hub stops or the explicit "on" below never arrives.
+ */
 export class ShellyPlug implements SmartPlug {
   constructor(
     private readonly host: string,
@@ -8,8 +11,9 @@ export class ShellyPlug implements SmartPlug {
   ) {}
 
   async powerCycle(offMs: number): Promise<void> {
-    await plugGet(this.fetchImpl, `http://${this.host}/relay/0?turn=off`);
+    const offSec = Math.max(1, Math.round(offMs / 1000));
+    await plugGet(this.fetchImpl, `http://${this.host}/relay/0?turn=off&timer=${offSec}`);
     await sleep(offMs);
-    await plugGet(this.fetchImpl, `http://${this.host}/relay/0?turn=on`);
+    await turnOnQuietly(this.fetchImpl, `http://${this.host}/relay/0?turn=on`);
   }
 }
