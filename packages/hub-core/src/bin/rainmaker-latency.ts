@@ -108,8 +108,17 @@ class StateWatcher {
       const onFrame = () => done();
       w.listeners.add(onFrame);
       ws.once("open", () => ws.send(JSON.stringify({ type: "auth", token })));
-      ws.once("error", (e) => done(e));
+      ws.on("error", (e) => done(e));
       ws.once("close", () => done(new Error("WebSocket closed (bad token?)")));
+    }).catch((err: unknown) => {
+      ws.terminate();
+      const code = (err as { code?: string }).code;
+      const msg = err instanceof Error && err.message ? err.message : "";
+      throw new Error(
+        msg.startsWith("WebSocket")
+          ? msg
+          : `cannot reach hub ${hub} (${code ?? (msg || String(err))})`,
+      );
     });
     return w;
   }
