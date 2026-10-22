@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/controller-sim" },
+    { "path": "packages/hub-core" },
+    { "path": "packages/homebridge-rainmaker" }
+  ]
+}

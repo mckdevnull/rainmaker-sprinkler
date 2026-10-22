@@ -96,7 +96,7 @@ git commit -m "docs: phase 0 controller prep checklist"
 - `SimState` in `state.ts`: `{ enabled: boolean; rainDelayUntil: number | null; stations: { name: string; running: boolean; remainingSec: number }[]; queue: { sid: number; sec: number }[]; programs: SimProgram[]; log: LogEntry[] }`.
 - Endpoints, matching firmware 2.1.7 `server.cpp` (research doc `docs/research/firmware-and-hardware.md` §4): `/jo`, `/jc`, `/js`, `/jn`, `/jp`, `/jl`, `/cm`, `/cv`, `/cp`. Every one requires `pw`. Wrong `pw` → `{"result":2}` **except `/jo` and `/ja`, which return `{"fwv":<fwv>}` with HTTP 200**. Success for commands → `{"result":1}`.
 - `SimOptions.tzOffsetSec` (default `-6*3600`): all controller-side times are `Math.floor(clock()/1000) + tzOffsetSec`.
-- Behaviour to model: **one request at a time** (a second concurrent socket waits until the first response is sent); stations run **sequentially** (a `/cm` while one runs appends to `queue`); `/cv?rsn=1` stops everything; `/cv?rd=H` sets `rainDelayUntil = now + H*3600e3` (hub ms) and reports `rdst` as controller-local seconds; `/cv?en=0|1` sets `enabled`; `/cm` works even when `enabled=false`; `/jc` returns `{devt, en, rd, rdst, sbits, ps, nbrd, lrun}`; `/js` returns `{sn, nstations}`; `/jn` returns `{snames}`; `/jo` returns `{fwv, hwv, nbrd, ipas, wl, tz}`; `/jp` returns `{nprogs, pd: [[flag, days0, days1, [start0..3], [dur..], "name"], ...]}` where enable is bit 0 of `flag` and weather-adjust bit 1; `/cp?pid=&v=[flag,days0,days1,[starts],[durs]]&name=` replaces that program, and **omitting `name` renames it to `Program N`** (firmware behaviour); `/jl?start=&end=` (controller-local days) returns `[[pid, sid, durSec, endTsLocal], ...]`.
+- Behaviour to model: **one request at a time** (a second concurrent socket waits until the first response is sent); stations run **sequentially** (a `/cm` while one runs appends to `queue`); `/cv?rsn=1` stops everything; `/cv?rd=H` sets `rainDelayUntil = now + H*3600e3` (hub ms) and reports `rdst` as controller-local seconds; `/cv?en=0|1` sets `enabled`; `/cm` works even when `enabled=false`; `/jc` returns `{devt, en, rd, rdst, sbits, ps, nbrd, lrun}`; `/js` returns `{sn, nstations}`; `/jn` returns `{snames}`; `/jo` returns `{fwv, hwv, nbrd, ipas, wl, tz}`; `/jp` returns `{nprogs, pd: [[flag, days0, days1, [start0..3], [dur..], "name"], ...]}` where enable is bit 0 of `flag` and weather-adjust bit 1; `/cp?pid=&v=[flag,days0,days1,[starts],[durs]]&name=` replaces that program, and **omitting `name` renames it to `Program N`** (firmware behaviour); `/jl?start=&end=` takes **controller-local seconds** (the firmware divides by 86400 to get day numbers) or `/jl?hist=N` for the past N days, and returns `[[pid, sid, durSec, endTsLocal], ...]`. With `SimOptions.hasLog: false` (default `true`), `/jl` returns HTTP 404 with an empty body, as the firmware does on a board without an SD card (v2.0–v2.2).
 
 - [ ] **Step 1: Scaffold the monorepo** (root `package.json` with `"workspaces": ["packages/*"]`, scripts `test: vitest run`, `build: tsc -b`, `lint: eslint .`; `tsconfig.base.json` with `strict`, `module: NodeNext`, `target: ES2022`; devDeps `typescript`, `vitest`, `eslint`, `@types/node`). Run `npm install` and `npm test` → vitest reports no test files, exit 0.
 
@@ -164,7 +164,7 @@ git commit -m "feat(sim): controller simulator with single-client and password m
   export interface JpResponse { nprogs: number; pd: ProgramData[]; }
   export type ProgramData = [number, number, number, number[], number[], string]; // flag, days0, days1, starts, durations, name
   export type LogEntry = [number, number, number, number];   // pid, sid, durSec, endTsLocal
-  export interface RequestOptions { deadlineMs?: number; signal?: AbortSignal }  // deadline overrides timeoutMs
+  export interface RequestOptions { deadlineMs?: number; signal?: AbortSignal; confirm?: boolean }  // deadline overrides timeoutMs; confirm → 'confirm' priority
   // errors.ts
   export class ControllerUnreachable extends Error {}
   export class ControllerUnauthorized extends Error {}
@@ -178,7 +178,7 @@ git commit -m "feat(sim): controller simulator with single-client and password m
     getStations(o?: RequestOptions): Promise<JsResponse>;
     getNames(o?: RequestOptions): Promise<JnResponse>;
     getPrograms(o?: RequestOptions): Promise<JpResponse>;
-    getLog(startDayLocal: number, endDayLocal: number, o?: RequestOptions): Promise<LogEntry[]>;
+    getLog(startLocalSec: number, endLocalSec: number, o?: RequestOptions): Promise<LogEntry[] | null>;  // null when the controller has no log (HTTP 404, no SD card)
     runStation(sid: number, seconds: number, o?: RequestOptions): Promise<void>;   // command: /cm?sid&en=1&t
     stopStation(sid: number, o?: RequestOptions): Promise<void>;                   // command: /cm?sid&en=0
     stopAll(o?: RequestOptions): Promise<void>;                                    // command: /cv?rsn=1
@@ -245,17 +245,19 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   // model.ts
   export type ZoneStatus = 'idle' | 'running' | 'queued' | 'unknown';
   export interface Zone { id: number; name: string; status: ZoneStatus; remainingSec: number | null; lastRunAt: number | null; }
-  export type ScheduleKind = 'weekly' | 'interval' | 'odd-days' | 'even-days';
+  export type ScheduleKind = 'weekly' | 'biweekly' | 'monthly' | 'interval';   // flag bits 4–5 (firmware 2.1.7 program.h: 0 weekly, 1 biweekly, 2 monthly, 3 interval)
+  export type OddEven = 'none' | 'odd' | 'even';                               // flag bits 2–3 (0 none, 1 odd, 2 even)
   export interface Schedule {
-    id: number; name: string; enabled: boolean; weatherAdjust: boolean; kind: ScheduleKind;
-    days: boolean[];            // weekly only (Mon..Sun); empty otherwise
-    startMinutes: number[];     // up to 4, -1 entries removed
+    id: number; name: string; enabled: boolean; weatherAdjust: boolean; kind: ScheduleKind; oddEven: OddEven;
+    fixedStartTimes: boolean;   // flag bit 6: 1 = up to 4 fixed start times; 0 = repeating (starts[0] start, [1] repeat count, [2] repeat every)
+    days: boolean[];            // weekly only (Mon..Sun, days0 bit 0 = Monday); empty otherwise
+    startMinutes: number[];     // fixed type: up to 4, -1 entries removed; repeating type: [start] only
     zoneMinutes: Record<number, number>;
     pausedUntil: number | null;
     raw: ProgramData;           // the untouched /jp entry; every write starts from this
   }
   export interface ControllerState {
-    online: boolean; unauthorized: boolean; lastSeenAt: number | null;
+    online: boolean; unauthorized: boolean; lastSeenAt: number | null;   // lastSeenAt is excluded from the change diff (store keeps it outside the compared state)
     tzOffsetSec: number;        // derived from devt each poll; 0 until first poll
     enabled: boolean; rainDelayUntil: number | null;   // UTC ms
     zones: Zone[]; schedules: Schedule[];
@@ -277,6 +279,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
     constructor(client: ControllerClient, store: StateStore, opts?: Partial<PollerOptions>);
     start(): void; stop(): void;
     pollNow(): Promise<void>;      // one /jc + /js round; /jn, /jp, /jo only when nbrd/nstations changed or every 60 s
+    applyStatus(jc: JcResponse, js?: JsResponse): void;   // the mapping pollNow uses; Commands calls it after a confirm read
   }
   ```
 - Mapping: `sbits` bit per station → `running`; `ps[sid] = [pid, remaining, start]` → `remainingSec` and `queued` when `pid !== 0 && remaining > 0 && !running`; `tzOffsetSec = round((devt - floor(Date.now()/1000)) / 900) * 900`; `rd===1` → `rainDelayUntil = localToUtcMs(rdst, tzOffsetSec)`; `pd[i][0] & 1` → `enabled`, `& 2` → `weatherAdjust`.
@@ -291,7 +294,10 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `shrinks zones when the controller reports fewer stations` (Review Focus 2): `sim.setStationCount(4)` between polls → `zones.length===4`, no throw.
   - `patch emits change only on real differences`.
   - `rain delay end is converted from controller-local time`: sim `tzOffsetSec: -21600`, `/cv?rd=2` → `rainDelayUntil` within 1 s of `Date.now() + 2h` (not off by 6 h).
-  - `program round-trip is lossless`: `scheduleToProgram(programToSchedule(0, pd))` deep-equals `pd` for a weekly, an interval and an odd-day fixture; flipping only `enabled` changes only bit 0.
+  - `program round-trip is lossless`: `scheduleToProgram(programToSchedule(0, pd))` deep-equals `pd` for a weekly, an interval (flag `0b0110001` = type 3, enabled), a weekly odd-day (`0b0000101`) and a repeating-start fixture; flipping only `enabled` changes only bit 0.
+  - `lastSeenAt does not cause change events`: two identical idle polls → `'change'` emitted once (first) then zero times.
+  - `goes offline on exactly the third consecutive failure`: after 2 failures `online` still true; after the 3rd `online` false.
+  - `PollSuperseded does not count as a failure`.
 
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** `model.ts`, `store.ts` (deep-equal via `node:util.isDeepStrictEqual`), `poller.ts`.
@@ -402,7 +408,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   export function evaluateWarnings(zoneId: number, settings: WarningSettings, forecast: Forecast | null, lastRunAt: number | null, now: number): Warning[];
   ```
 - Open-Meteo request: `https://api.open-meteo.com/v1/forecast?latitude=&longitude=&hourly=precipitation_probability,temperature_2m&forecast_hours=24&timezone=UTC`. `rainProbabilityPct` is the max of the 24 hourly values starting from the current hour (Codex finding 9). `tempC` is the current hour's temperature.
-- `RunHistory.refresh()` calls `getLog(todayLocal - 7, todayLocal)` where `todayLocal = floor((nowSec + tzOffsetSec) / 86400)`, and converts each `endTsLocal` with `localToUtcMs`.
+- `RunHistory.refresh()` calls `getLog(nowLocalSec - 7*86400, nowLocalSec)` where `nowLocalSec = floor(Date.now()/1000) + tzOffsetSec`, and converts each `endTsLocal` with `localToUtcMs`. **When `getLog` returns `null` (no SD card, e.g. the owner's v2.2), history comes only from the hub's own command events plus `/jc.lrun` (`[sid, pid, durSec, endTsLocal]`), persisted so it survives restarts.** Add test `falls back to lrun and local events when the controller has no log` (sim `hasLog: false`).
 - Warnings are **pure**; the API layer (Task 8) decides when to ask. Sources `homekit`/`alexa` never evaluate warnings (spec §4).
 
 - [ ] **Step 1: Tests**: history `lastRunAt uses the later of /jl and local command events`, `log end times are converted from controller-local time` (sim `tzOffsetSec: -21600`; a run that ended 10 min ago reports `lastRunAt` within 60 s of `Date.now() - 10 min`), and `survives restart`; weather `parses the max over the next 24 hourly values` (fixture with 90 % at hour 30 and 20 % within the window → 20), `window crosses midnight` (fixture at 22:00 UTC with 70 % at 03:00 next day → 70), `caches for 30 minutes`, `returns null-safe forecast on network error` (no throw, `rainProbabilityPct: -1`, `summary: 'Forecast unavailable'`); warnings `rain warning at/above threshold`, `no rain warning when disabled`, `recent-run warning inside window`, `no warnings with null inputs`.
@@ -464,7 +470,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   export interface Capabilities { mqtt: boolean; pauseUntil: true; maxRainDelayHours: 32767; firmware: number | null }
   export interface Hub {
     store: StateStore; commands: Commands; pause: PauseService; history: RunHistory; forecast(): Promise<Forecast | null>;
-    settings: SettingsStore; watchdog: Watchdog; notifier: Notifier;
+    settings: SettingsStore; watchdog: Watchdog; notifier: Notifier; pairing: Pairing;
     start(): Promise<void>; stop(): Promise<void>; capabilities(): Capabilities;
   }
   export function createHub(config: HubConfig): Hub;
@@ -492,7 +498,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `GET /v1/schedules`, `PUT /v1/schedules/:id` (`Schedule` minus `pausedUntil`) → `setProgram` mapping; zones in controller order.
   - `GET/PUT /v1/settings` (`Settings`)
   - `GET /v1/zones/:id/photo`, `PUT /v1/zones/:id/photo` (JPEG ≤ 2 MB, stored under `dataDir/photos/<id>.jpg`)
-  - `POST /v1/pair {code, deviceName}` → `{token}`; `POST /v1/pairing/start` → `{code, expiresAt}`; `GET /v1/devices`, `DELETE /v1/devices/:token`, `PUT /v1/devices/:token/push {apnsToken}`
+  - `POST /v1/pair {code, deviceName}` → `{token, id}`; `POST /v1/pairing/start` → `{code, expiresAt}`; `GET /v1/devices` → `[{id, name, createdAt}]` (id = SHA-256 of the token, hex); `DELETE /v1/devices/:id`, `PUT /v1/devices/:id/push {apnsToken}`. Bearer tokens never appear in URLs (Ruling M).
   - `GET /v1/ws` → WebSocket. **Browser-compatible auth** (Codex finding 6): no header required; the client's first message must be `{type:'auth', token}` within 2 s, otherwise the socket closes with code 4401 and nothing is sent. After auth: `{type:'state', state}` immediately and on every store change, `{type:'event', name, payload}` for `command|offline|online|power-cycle|recovery-exhausted`.
   - CORS: allow any origin for `GET`; for other methods allow `allowedOrigins` plus `http://<controller host>` (spec §5.1).
 - mDNS: advertise `_rainmaker._tcp` on `apiPort` with TXT `v=1`.
