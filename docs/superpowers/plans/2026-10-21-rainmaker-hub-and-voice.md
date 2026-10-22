@@ -14,7 +14,10 @@
 
 - Node.js `>=20`. TypeScript strict mode. MIT licence header not required per file; `LICENSE` at the repo root covers it.
 - **At most one in-flight HTTP request to the controller at any time**, across the whole hub (spec §3, §5.1).
-- Support firmware **2.1.6 through 2.2.1(4)**. Password: try MD5-hex `pw` first; on `{"result":2}` retry plaintext once and remember the mode (spec §5.1, §5.4).
+- Support firmware **2.1.6 through 2.2.1(4)**. Password: try MD5-hex `pw` first; on `{"result":2}` retry plaintext once and remember the mode (spec §5.1, §5.4). **Negotiate on `/jc`, never on `/jo` or `/ja`:** those two answer a wrong password with `{"fwv":N}` and HTTP 200 (firmware 2.1.7 `server.cpp` dispatch), so a `/jo` reply that contains only `fwv` means *unauthorized*.
+- **Controller clocks are local time.** `devt`, `rdst`, log end times and `/jl` ranges are seconds in the controller's configured timezone (`os.now_tz()`), not UTC. The hub derives `tzOffsetSec = round((devt - nowUtcSec) / 900) * 900` on every `/jc` and converts with it. Hub-side timestamps are always UTC ms.
+- **Program data is round-tripped losslessly.** `/jp` entries are `[flag, days0, days1, [starts], [durations], name]`; the `flag` byte packs enable (bit 0), weather-adjust (bit 1), odd/even and interval type bits. `/cp` must always resend `name` and the untouched `flag` bits except the one being changed.
+- **End-to-end command deadline 3000 ms**, measured from the API call, covering queue wait, the request and the confirmation read.
 - **The controller password never leaves the hub** (spec §5.1): it is never in API responses, logs, WebSocket events or error messages.
 - Commands preempt status polls (spec §5.1, §6).
 - Latency targets (spec §6): app/web command → confirmed ≤ 1.5 s on LAN; offline failure reported ≤ 3 s.
@@ -74,6 +77,8 @@ git commit -m "docs: phase 0 controller prep checklist"
     fwv: number;                 // default 216
     hwv: number;                 // default 22
     responseDelayMs: number;     // default 150, applied to every request
+    tzOffsetSec: number;         // default -21600; controller-local = UTC + offset
+    dropCommands: boolean;       // default false; true acks /cm and /cv with result:1 but changes nothing
     clock?: () => number;        // ms since epoch; default Date.now
   }
   export interface Simulator {
@@ -89,13 +94,17 @@ git commit -m "docs: phase 0 controller prep checklist"
   export function createSimulator(opts?: Partial<SimOptions>): Simulator;
   ```
 - `SimState` in `state.ts`: `{ enabled: boolean; rainDelayUntil: number | null; stations: { name: string; running: boolean; remainingSec: number }[]; queue: { sid: number; sec: number }[]; programs: SimProgram[]; log: LogEntry[] }`.
-- Endpoints, matching the firmware (research doc `docs/research/firmware-and-hardware.md` §4): `/jo`, `/jc`, `/js`, `/jn`, `/jp`, `/jl`, `/cm`, `/cv`, `/cp`. Every one requires `pw`. Wrong `pw` → `{"result":2}`. Success for commands → `{"result":1}`.
-- Behaviour to model: **one request at a time** (a second concurrent socket waits until the first response is sent); stations run **sequentially** (a `/cm` while one runs appends to `queue`); `/cv?rsn=1` stops everything; `/cv?rd=H` sets `rainDelayUntil = now + H*3600e3`; `/cv?en=0|1` sets `enabled`; `/cm` works even when `enabled=false`; `/jc` returns `{devt, en, rd, rdst, sbits, ps, nbrd}`; `/js` returns `{sn, nstations}`; `/jn` returns `{snames}`; `/jo` returns `{fwv, hwv, nbrd, ipas, wl}`; `/jp` returns `{nprogs, pd: [[flag, days0, days1, [start0..3], [dur..]], ...]}` where enable is bit 0 of `flag`; `/cp?pid=&v=` replaces that program; `/jl?start=&end=` returns `[[pid, sid, durSec, endTs], ...]`.
+- Endpoints, matching firmware 2.1.7 `server.cpp` (research doc `docs/research/firmware-and-hardware.md` §4): `/jo`, `/jc`, `/js`, `/jn`, `/jp`, `/jl`, `/cm`, `/cv`, `/cp`. Every one requires `pw`. Wrong `pw` → `{"result":2}` **except `/jo` and `/ja`, which return `{"fwv":<fwv>}` with HTTP 200**. Success for commands → `{"result":1}`.
+- `SimOptions.tzOffsetSec` (default `-6*3600`): all controller-side times are `Math.floor(clock()/1000) + tzOffsetSec`.
+- Behaviour to model: **one request at a time** (a second concurrent socket waits until the first response is sent); stations run **sequentially** (a `/cm` while one runs appends to `queue`); `/cv?rsn=1` stops everything; `/cv?rd=H` sets `rainDelayUntil = now + H*3600e3` (hub ms) and reports `rdst` as controller-local seconds; `/cv?en=0|1` sets `enabled`; `/cm` works even when `enabled=false`; `/jc` returns `{devt, en, rd, rdst, sbits, ps, nbrd, lrun}`; `/js` returns `{sn, nstations}`; `/jn` returns `{snames}`; `/jo` returns `{fwv, hwv, nbrd, ipas, wl, tz}`; `/jp` returns `{nprogs, pd: [[flag, days0, days1, [start0..3], [dur..], "name"], ...]}` where enable is bit 0 of `flag` and weather-adjust bit 1; `/cp?pid=&v=[flag,days0,days1,[starts],[durs]]&name=` replaces that program, and **omitting `name` renames it to `Program N`** (firmware behaviour); `/jl?start=&end=` (controller-local days) returns `[[pid, sid, durSec, endTsLocal], ...]`.
 
 - [ ] **Step 1: Scaffold the monorepo** (root `package.json` with `"workspaces": ["packages/*"]`, scripts `test: vitest run`, `build: tsc -b`, `lint: eslint .`; `tsconfig.base.json` with `strict`, `module: NodeNext`, `target: ES2022`; devDeps `typescript`, `vitest`, `eslint`, `@types/node`). Run `npm install` and `npm test` → vitest reports no test files, exit 0.
 
 - [ ] **Step 2: Write the failing tests** in `packages/controller-sim/test/sim.test.ts`:
-  - `rejects wrong password with result 2`: GET `/jo?pw=nope` → body `{"result":2}`.
+  - `rejects wrong password with result 2`: GET `/jc?pw=nope` → body `{"result":2}`.
+  - `jo with wrong password returns only fwv`: GET `/jo?pw=nope` → HTTP 200, body exactly `{"fwv":216}`.
+  - `cp without name renames the program`: `/cp?pid=0&v=[...]` with no `name` → `/jp` shows `"Program 1"`; with `name=Lawn` keeps `Lawn`.
+  - `times are controller-local`: `tzOffsetSec: -21600`; `/jc.devt === floor(clock()/1000) - 21600`.
   - `plain mode accepts plaintext, md5 mode accepts md5 hex`: two simulators, same password; assert `/jo` returns `fwv` under the right form and `{"result":2}` under the other.
   - `serves one request at a time`: `responseDelayMs: 300`; fire two `/js` concurrently; assert the second resolves ≥ 250 ms after the first.
   - `cm runs a station and queues a second`: `/cm?sid=0&en=1&t=60` then `/cm?sid=1&en=1&t=30`; `state.stations[0].running === true`, `state.queue` equals `[{sid:1, sec:30}]`; `tick(60_000)` → station 1 running.
@@ -115,7 +124,7 @@ Expected: FAIL, "createSimulator is not a function" or module not found.
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `npx vitest run packages/controller-sim`
-Expected: PASS, 9 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -138,22 +147,24 @@ git commit -m "feat(sim): controller simulator with single-client and password m
 - Produces:
   ```ts
   // queue.ts
-  export type Priority = 'command' | 'poll';
   export class PollSuperseded extends Error {}
   export class SerialQueue {
     constructor(opts?: { maxPollBacklog?: number }); // default 1: a new poll replaces a waiting poll
-    run<T>(priority: Priority, fn: () => Promise<T>): Promise<T>;
+    run<T>(priority: Priority, fn: (signal: AbortSignal) => Promise<T>): Promise<T>;
+    // 'command' and 'confirm' are never superseded; a queued command aborts the in-flight poll's signal
     readonly inFlight: boolean;
   }
+  export type Priority = 'command' | 'confirm' | 'poll';
   // types.ts
-  export interface ControllerConfig { baseUrl: string; password: string; timeoutMs?: number /* default 2500 */; }
-  export interface JcResponse { devt: number; en: 0|1; rd: 0|1; rdst: number; sbits: number[]; ps: [number, number, number][]; nbrd: number; }
+  export interface ControllerConfig { baseUrl: string; password: string; timeoutMs?: number /* default 1500 */; }
+  export interface JcResponse { devt: number; en: 0|1; rd: 0|1; rdst: number; sbits: number[]; ps: [number, number, number][]; nbrd: number; lrun: [number, number, number, number]; }
   export interface JsResponse { sn: (0|1)[]; nstations: number; }
-  export interface JoResponse { fwv: number; hwv: number; nbrd: number; ipas: 0|1; wl: number; }
+  export interface JoResponse { fwv: number; hwv: number; nbrd: number; ipas: 0|1; wl: number; tz: number; }
   export interface JnResponse { snames: string[]; }
   export interface JpResponse { nprogs: number; pd: ProgramData[]; }
-  export type ProgramData = [number, number, number, number[], number[]];
-  export type LogEntry = [number, number, number, number];
+  export type ProgramData = [number, number, number, number[], number[], string]; // flag, days0, days1, starts, durations, name
+  export type LogEntry = [number, number, number, number];   // pid, sid, durSec, endTsLocal
+  export interface RequestOptions { deadlineMs?: number; signal?: AbortSignal }  // deadline overrides timeoutMs
   // errors.ts
   export class ControllerUnreachable extends Error {}
   export class ControllerUnauthorized extends Error {}
@@ -162,36 +173,43 @@ git commit -m "feat(sim): controller simulator with single-client and password m
   export class ControllerClient {
     constructor(cfg: ControllerConfig, queue?: SerialQueue);
     readonly passwordMode: PasswordMode | 'unknown';
-    getOptions(): Promise<JoResponse>;          // poll priority
-    getStatus(): Promise<JcResponse>;           // poll
-    getStations(): Promise<JsResponse>;         // poll
-    getNames(): Promise<JnResponse>;            // poll
-    getPrograms(): Promise<JpResponse>;         // poll
-    getLog(startSec: number, endSec: number): Promise<LogEntry[]>; // poll
-    runStation(sid: number, seconds: number): Promise<void>;   // command: /cm?sid&en=1&t
-    stopStation(sid: number): Promise<void>;                   // command: /cm?sid&en=0
-    stopAll(): Promise<void>;                                  // command: /cv?rsn=1
-    setRainDelayHours(hours: number): Promise<void>;           // command: /cv?rd=; 0 clears; caps at 32767
-    setEnabled(enabled: boolean): Promise<void>;               // command: /cv?en=
-    setProgram(pid: number, data: ProgramData): Promise<void>; // command: /cp?pid&v=
+    getOptions(o?: RequestOptions): Promise<JoResponse>;          // poll; a body with only `fwv` → ControllerUnauthorized
+    getStatus(o?: RequestOptions): Promise<JcResponse>;           // poll, or 'confirm' when o.confirm is true
+    getStations(o?: RequestOptions): Promise<JsResponse>;
+    getNames(o?: RequestOptions): Promise<JnResponse>;
+    getPrograms(o?: RequestOptions): Promise<JpResponse>;
+    getLog(startDayLocal: number, endDayLocal: number, o?: RequestOptions): Promise<LogEntry[]>;
+    runStation(sid: number, seconds: number, o?: RequestOptions): Promise<void>;   // command: /cm?sid&en=1&t
+    stopStation(sid: number, o?: RequestOptions): Promise<void>;                   // command: /cm?sid&en=0
+    stopAll(o?: RequestOptions): Promise<void>;                                    // command: /cv?rsn=1
+    setRainDelayHours(hours: number, o?: RequestOptions): Promise<void>;           // command: /cv?rd=; 0 clears; caps at 32767
+    setEnabled(enabled: boolean, o?: RequestOptions): Promise<void>;               // command: /cv?en=
+    setProgram(pid: number, data: ProgramData, o?: RequestOptions): Promise<void>; // command: /cp?pid&v=[flag,d0,d1,[starts],[durs]]&name=<urlencoded>
   }
   ```
+- Password negotiation uses `/jc`. The first call of any kind performs negotiation with `/jc` before proceeding.
 
 - [ ] **Step 1: Write failing queue tests** in `queue.test.ts`:
   - `runs tasks one at a time`: two 100 ms tasks → second starts after first ends; `inFlight` true during.
   - `command jumps ahead of waiting polls`: enqueue poll A (running), poll B, command C → completion order A, C, B.
   - `a new poll replaces a waiting poll`: enqueue poll A (running), poll B, poll C → B is rejected with `PollSuperseded`, order A, C.
   - `a failing task does not block the queue`.
+  - `a queued command aborts the in-flight poll`: poll A's `signal.aborted` becomes true when command C is enqueued; C starts within 10 ms of A settling.
+  - `confirm is never superseded`: enqueue confirm X, poll Y, poll Z → X runs; Y superseded by Z.
 
 - [ ] **Step 2: Run** `npx vitest run packages/hub-core/test/controller/queue.test.ts` → FAIL (module not found).
 
 - [ ] **Step 3: Implement `SerialQueue`** in `queue.ts`. Two arrays (commands, polls); `run` returns a promise resolved when its turn completes; drain loop picks commands first.
 
-- [ ] **Step 4: Run** the queue tests → PASS, 4 tests.
+- [ ] **Step 4: Run** the queue tests → PASS, 6 tests.
 
 - [ ] **Step 5: Write failing client tests** in `client.test.ts` against a simulator per test (`beforeEach` listen on port 0):
-  - `negotiates md5 then plaintext on a 2.1.6 controller`: sim `passwordMode:'plain'`; `getOptions()` resolves; `client.passwordMode === 'plain'`; `sim.requestCount === 2`.
+  - `negotiates md5 then plaintext on a 2.1.6 controller`: sim `passwordMode:'plain'`; `getStatus()` resolves; `client.passwordMode === 'plain'`; `sim.requestCount === 2`.
   - `uses md5 directly on a 2.1.7 controller`: sim `'md5'`; `requestCount === 1`; `passwordMode === 'md5'`.
+  - `getOptions treats a fwv-only body as unauthorized`: wrong password, mode forced; `getOptions()` rejects with `ControllerUnauthorized`, never resolves with a partial `JoResponse`.
+  - `getOptions first negotiates on jc`: fresh client, `getOptions()` → sim saw `/jc` before `/jo`.
+  - `setProgram always sends name and preserves flag bits`: `setProgram(0, [0b110, …, 'Lawn'])` → sim program 0 has `flag === 0b110` and name `Lawn`.
+  - `deadline bounds a call even when a poll is in flight`: sim `responseDelayMs: 2000`; start `getStatus()` (poll), then `runStation(0, 60, {deadlineMs: 1000})` → the command rejects with `ControllerUnreachable` within 1100 ms of its call.
   - `throws ControllerUnauthorized after one re-negotiation when the password changes` (Review Focus 1): after a successful call, `sim.setPassword('changed')`; next call rejects with `ControllerUnauthorized`; a further call makes **no** request for 30 s (fake timers, `requestCount` unchanged).
   - `times out and throws ControllerUnreachable`: `timeoutMs: 200`, sim `responseDelayMs: 1000` → rejects within 300 ms.
   - `throws ControllerUnreachable when offline`: `setOffline(true)` → rejects.
@@ -201,9 +219,9 @@ git commit -m "feat(sim): controller simulator with single-client and password m
 
 - [ ] **Step 6: Run** → FAIL.
 
-- [ ] **Step 7: Implement `ControllerClient`** in `client.ts` with node `fetch` and `AbortSignal.timeout`. MD5 via `node:crypto`. On `result:2` with mode unknown: retry the other form once. On `result:2` with mode known: retry once with the other form, then throw `ControllerUnauthorized` and set a 30 s backoff during which calls reject immediately.
+- [ ] **Step 7: Implement `ControllerClient`** in `client.ts` with node `fetch` and `AbortSignal.any([AbortSignal.timeout(min(timeoutMs, deadline remaining)), queueSignal, o.signal])`. MD5 via `node:crypto`. On `result:2` (or fwv-only `/jo`) with mode unknown: retry the other form once. With mode known: retry once with the other form, then throw `ControllerUnauthorized` and set a 30 s backoff during which calls reject immediately.
 
-- [ ] **Step 8: Run** `npx vitest run packages/hub-core` → PASS, 12 tests.
+- [ ] **Step 8: Run** `npx vitest run packages/hub-core` → PASS, 18 tests.
 
 - [ ] **Step 9: Commit**
 
@@ -227,13 +245,26 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   // model.ts
   export type ZoneStatus = 'idle' | 'running' | 'queued' | 'unknown';
   export interface Zone { id: number; name: string; status: ZoneStatus; remainingSec: number | null; lastRunAt: number | null; }
-  export interface Schedule { id: number; name: string; enabled: boolean; days: boolean[]; startMinutes: number[]; zoneMinutes: Record<number, number>; pausedUntil: number | null; }
+  export type ScheduleKind = 'weekly' | 'interval' | 'odd-days' | 'even-days';
+  export interface Schedule {
+    id: number; name: string; enabled: boolean; weatherAdjust: boolean; kind: ScheduleKind;
+    days: boolean[];            // weekly only (Mon..Sun); empty otherwise
+    startMinutes: number[];     // up to 4, -1 entries removed
+    zoneMinutes: Record<number, number>;
+    pausedUntil: number | null;
+    raw: ProgramData;           // the untouched /jp entry; every write starts from this
+  }
   export interface ControllerState {
     online: boolean; unauthorized: boolean; lastSeenAt: number | null;
-    enabled: boolean; rainDelayUntil: number | null;
+    tzOffsetSec: number;        // derived from devt each poll; 0 until first poll
+    enabled: boolean; rainDelayUntil: number | null;   // UTC ms
     zones: Zone[]; schedules: Schedule[];
     firmware: { fwv: number; hwv: number } | null;
   }
+  // model.ts helpers
+  export function programToSchedule(pid: number, pd: ProgramData): Schedule;
+  export function scheduleToProgram(s: Schedule): ProgramData;   // starts from s.raw; sets bit 0 from enabled, bit 1 from weatherAdjust; keeps all other bits and name
+  export function localToUtcMs(localSec: number, tzOffsetSec: number): number;
   export const emptyState: ControllerState;
   // store.ts
   export class StateStore extends EventEmitter {   // emits 'change' (state), 'online', 'offline', 'command'
@@ -248,7 +279,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
     pollNow(): Promise<void>;      // one /jc + /js round; /jn, /jp, /jo only when nbrd/nstations changed or every 60 s
   }
   ```
-- Mapping: `sbits` bit per station → `running`; `ps[sid] = [pid, remaining, start]` → `remainingSec` and `queued` when `pid !== 0 && remaining > 0 && !running`; `rd===1` → `rainDelayUntil = rdst*1000`; `pd[i][0] & 1` → `schedule.enabled`.
+- Mapping: `sbits` bit per station → `running`; `ps[sid] = [pid, remaining, start]` → `remainingSec` and `queued` when `pid !== 0 && remaining > 0 && !running`; `tzOffsetSec = round((devt - floor(Date.now()/1000)) / 900) * 900`; `rd===1` → `rainDelayUntil = localToUtcMs(rdst, tzOffsetSec)`; `pd[i][0] & 1` → `enabled`, `& 2` → `weatherAdjust`.
 
 - [ ] **Step 1: Write failing tests** in `poller.test.ts` (simulator + fake timers):
   - `first poll fills zones and firmware from the controller`: 8 zones, names from `/jn`, `firmware.fwv === 216`.
@@ -259,10 +290,12 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `recovers and emits online`: `setOffline(false)` → next poll `online===true`, `'online'` emitted once.
   - `shrinks zones when the controller reports fewer stations` (Review Focus 2): `sim.setStationCount(4)` between polls → `zones.length===4`, no throw.
   - `patch emits change only on real differences`.
+  - `rain delay end is converted from controller-local time`: sim `tzOffsetSec: -21600`, `/cv?rd=2` → `rainDelayUntil` within 1 s of `Date.now() + 2h` (not off by 6 h).
+  - `program round-trip is lossless`: `scheduleToProgram(programToSchedule(0, pd))` deep-equals `pd` for a weekly, an interval and an odd-day fixture; flipping only `enabled` changes only bit 0.
 
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** `model.ts`, `store.ts` (deep-equal via `node:util.isDeepStrictEqual`), `poller.ts`.
-- [ ] **Step 4: Run** `npx vitest run packages/hub-core/test/state` → PASS, 8 tests.
+- [ ] **Step 4: Run** `npx vitest run packages/hub-core/test/state` → PASS, 10 tests.
 - [ ] **Step 5: Commit** `git commit -m "feat(hub): state store and adaptive poller with offline detection"`
 
 ---
@@ -278,7 +311,8 @@ git commit -m "feat(hub): serialized controller client with password negotiation
 - Produces:
   ```ts
   export type CommandSource = 'app' | 'web' | 'siri-intent' | 'homekit' | 'alexa';
-  export type CommandResult = { ok: true; confirmedInMs: number } | { ok: false; error: 'offline' | 'unauthorized' | 'rejected' | 'timeout' };
+  export type CommandResult = { ok: true; confirmedInMs: number } | { ok: false; error: 'offline' | 'unauthorized' | 'rejected' | 'timeout' | 'not-applied' };
+  export const COMMAND_DEADLINE_MS = 3000;
   export class Commands {
     constructor(client: ControllerClient, store: StateStore, poller: Poller);
     runZone(id: number, seconds: number, source: CommandSource): Promise<CommandResult>;
@@ -287,7 +321,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
     setSystemEnabled(enabled: boolean, source: CommandSource): Promise<CommandResult>;
   }
   ```
-- Behaviour: patch the store immediately (`status:'running'` or `'queued'` if another zone is running, `remainingSec: seconds`), send the command, then `pollNow()` to confirm. If the poll contradicts the optimistic state, the poll wins. If the client throws, revert the optimistic patch and return `ok:false`. Pause/resume lives in Task 5, not here.
+- Behaviour: start a deadline of `COMMAND_DEADLINE_MS`; patch the store immediately (`status:'running'` or `'queued'` if another zone is running, `remainingSec: seconds`); send the command with `{deadlineMs: remaining}`; then confirm with `client.getStatus({confirm: true, deadlineMs: remaining})` and apply it to the store. **Confirmation predicates:** `runZone` → `sbits` bit set for `id`, or `ps[id][0] !== 0` (queued); `stopZone` → bit clear and `ps[id][0] === 0`; `stopAll` → all bits clear; `setSystemEnabled` → `en` matches. If the predicate fails, re-read once more (within the deadline, ≥ 300 ms later); if still false return `{ok:false, error:'not-applied'}` and let the real state stand. If the client throws, revert the optimistic patch and map the error (`ControllerUnreachable` → `offline`/`timeout`, `ControllerUnauthorized` → `unauthorized`, `ControllerRejected` → `rejected`). Pause/resume lives in Task 5, not here.
 
 - [ ] **Step 1: Write failing tests**:
   - `runZone reflects running before the controller responds`: sim `responseDelayMs: 400`; 50 ms after calling, store shows `running`; result `ok` with `confirmedInMs < 1500`.
@@ -296,8 +330,11 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `reverts and returns offline when unreachable`: `setOffline(true)`; result `{ok:false,error:'offline'}` within 3000 ms (spec §6); zone back to `unknown`/`idle`.
   - `stopAll clears running and queued`.
   - `source is recorded on the command event`: store emits `'command'` with `{type:'runZone', id, seconds, source}`.
+  - `returns not-applied when the controller acknowledges but does not run` (Codex finding 4): sim option `dropCommands: true` (acks `/cm` with `result:1` but changes nothing) → `{ok:false, error:'not-applied'}`, zone back to `idle`.
+  - `meets the 3 s deadline with a slow poll in flight` (Codex finding 5): sim `responseDelayMs: 2500`; start a poll, then `runZone` → result (ok or timeout) within 3100 ms of the call.
+  - `confirmation read survives concurrent polls`: fire `poller.pollNow()` three times while a command is confirming → the command still resolves `ok` with a real `confirmedInMs`.
 
-- [ ] **Step 2: Run** → FAIL.  **Step 3: Implement.**  **Step 4: Run** → PASS, 6 tests.
+- [ ] **Step 2: Run** → FAIL.  **Step 3: Implement.**  **Step 4: Run** → PASS, 9 tests.
 - [ ] **Step 5: Commit** `git commit -m "feat(hub): zone and system commands with optimistic confirm"`
 
 ---
@@ -320,13 +357,14 @@ git commit -m "feat(hub): serialized controller client with password negotiation
     constructor(client: ControllerClient, store: StateStore, persist: JsonStore, clock?: () => number);
     pauseAll(untilMs: number): Promise<CommandResult>;        // user-owned rain delay, capped per call at 32767 h, re-applied on expiry until `until`
     resumeAll(): Promise<CommandResult>;                        // rd=0, forget record
-    pauseSchedule(id: number, untilMs: number): Promise<CommandResult>;  // clear enable bit via setProgram; persist re-enable job
+    pauseSchedule(id: number, untilMs: number): Promise<CommandResult>;  // setProgram(scheduleToProgram({...s, enabled:false})); persist re-enable job
     resumeSchedule(id: number): Promise<CommandResult>;
     start(): void; stop(): void;                                // timer that re-applies/re-enables; also runs on start for missed jobs
     describe(): { all: PauseRecord | null; schedules: Record<number, number> };
   }
   ```
-- Owner detection: on each state change, if `rainDelayUntil` differs from the hub's record and the hub did not set it, treat it as `owner:'weather'`. If a weather delay ends before a user pause would have, re-apply the user pause (spec §5.1).
+- Owner detection: on each state change, if `rainDelayUntil` (UTC) differs from the hub's record by more than 90 s and the hub did not set it, treat it as `owner:'weather'`. If a weather delay ends before a user pause would have, re-apply the user pause (spec §5.1).
+- **Jobs are durable until they succeed** (Codex finding 8): a re-enable or re-apply job stays persisted until its command returns `ok:true`. Failed attempts are retried on every `'online'` event and every 60 s while online. Jobs are removed only on success or an explicit `resumeSchedule`/`resumeAll`.
 
 - [ ] **Step 1: JsonStore tests**: `returns fallback when missing`, `round-trips`, `write is atomic` (no `.tmp` left; concurrent `set` calls leave valid JSON).
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS.
@@ -336,7 +374,10 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `resumeAll clears the delay and record`.
   - `weather delay that overwrites a user pause is restored when it ends`: user pause 7 days; externally set sim `rd` to 1 day (simulating weather); advance 1 day → hub re-applies 6 days.
   - `pauseSchedule clears the enable bit and re-enables on the date`, and `persists across restart`: construct a second `PauseService` on the same `JsonStore`, `start()` → the re-enable still fires.
-- [ ] **Step 6: Run** → FAIL. **Step 7: Implement.** **Step 8: Run** → PASS, 8 tests.
+  - `pauseSchedule changes only the enable bit and keeps the name` (Codex finding 2): program named `Lawn` with flag `0b111` → after pause, sim shows flag `0b110` and name `Lawn`; after resume, `0b111`.
+  - `re-enable is retried when the controller is offline at the deadline` (Codex finding 8): `setOffline(true)` before the date; advance past it → job still in `describe().schedules`; `setOffline(false)` and emit online → program re-enabled and job gone.
+  - `restart while a job is pending and overdue restores it`: offline at deadline, stop service, new service `start()` while online → re-enabled.
+- [ ] **Step 6: Run** → FAIL. **Step 7: Implement.** **Step 8: Run** → PASS, 11 tests.
 - [ ] **Step 9: Commit** `git commit -m "feat(hub): pause-until with persistence and weather-delay reconciliation"`
 
 ---
@@ -360,11 +401,12 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   export type Warning = { kind: 'rain'; probabilityPct: number } | { kind: 'recent-run'; minutesAgo: number };
   export function evaluateWarnings(zoneId: number, settings: WarningSettings, forecast: Forecast | null, lastRunAt: number | null, now: number): Warning[];
   ```
-- Open-Meteo request: `https://api.open-meteo.com/v1/forecast?latitude=&longitude=&daily=precipitation_probability_max,temperature_2m_max&forecast_days=2&timezone=auto`.
+- Open-Meteo request: `https://api.open-meteo.com/v1/forecast?latitude=&longitude=&hourly=precipitation_probability,temperature_2m&forecast_hours=24&timezone=UTC`. `rainProbabilityPct` is the max of the 24 hourly values starting from the current hour (Codex finding 9). `tempC` is the current hour's temperature.
+- `RunHistory.refresh()` calls `getLog(todayLocal - 7, todayLocal)` where `todayLocal = floor((nowSec + tzOffsetSec) / 86400)`, and converts each `endTsLocal` with `localToUtcMs`.
 - Warnings are **pure**; the API layer (Task 8) decides when to ask. Sources `homekit`/`alexa` never evaluate warnings (spec §4).
 
-- [ ] **Step 1: Tests**: history `lastRunAt uses the later of /jl and local command events` and `survives restart`; weather `parses probability and builds summary` (stub fetch with a fixture), `caches for 30 minutes`, `returns null-safe forecast on network error` (no throw, `rainProbabilityPct: -1`, `summary: 'Forecast unavailable'`); warnings `rain warning at/above threshold`, `no rain warning when disabled`, `recent-run warning inside window`, `no warnings with null inputs`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS, 9 tests.
+- [ ] **Step 1: Tests**: history `lastRunAt uses the later of /jl and local command events`, `log end times are converted from controller-local time` (sim `tzOffsetSec: -21600`; a run that ended 10 min ago reports `lastRunAt` within 60 s of `Date.now() - 10 min`), and `survives restart`; weather `parses the max over the next 24 hourly values` (fixture with 90 % at hour 30 and 20 % within the window → 20), `window crosses midnight` (fixture at 22:00 UTC with 70 % at 03:00 next day → 70), `caches for 30 minutes`, `returns null-safe forecast on network error` (no throw, `rainProbabilityPct: -1`, `summary: 'Forecast unavailable'`); warnings `rain warning at/above threshold`, `no rain warning when disabled`, `recent-run warning inside window`, `no warnings with null inputs`.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS, 12 tests.
 - [ ] **Step 5: Commit** `git commit -m "feat(hub): run history, Open-Meteo forecast and warning evaluation"`
 
 ---
@@ -430,7 +472,14 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   export interface Settings { warnings: WarningSettings; zones: Record<number, { name?: string; order?: number; voiceSeconds: number }>; notifications: { offline: boolean } }
   export class SettingsStore { get(): Settings; update(p: Partial<Settings>): Promise<Settings>; }
   // auth.ts — tokens persisted in JsonStore key 'devices'
-  export class Pairing { startPairing(): { code: string; expiresAt: number }  /* 6 digits, 5 min */; claim(code: string, deviceName: string): { token: string } | null; verify(token: string): boolean; revoke(token: string): void; list(): { name: string; createdAt: number }[] }
+  export class Pairing extends EventEmitter {  // emits 'code' ({code, expiresAt}) whenever a code is issued
+    startPairing(): { code: string; expiresAt: number };  /* 6 digits, 5 min; replaces any live code */
+    claim(code: string, deviceName: string): { token: string } | null;
+    verify(token: string): boolean; revoke(token: string): void; list(): { name: string; createdAt: number }[];
+  }
+  ```
+- **Pairing entry points** (Codex finding 7): (1) `Hub.start()` calls `startPairing()` when **no devices are paired** and logs the code, re-issuing every 5 min until one is claimed; (2) `POST /v1/pairing/start` (authenticated) lets an already-paired device add another and returns the code; (3) the standalone CLI `rainmaker-hub pair --config …` sends that POST using a token read from `dataDir/cli-token`, which the hub writes on first start; (4) the Homebridge plugin logs the code from the `'code'` event and exposes a momentary **"Rainmaker Pairing"** switch that calls `startPairing()` (Task 9).
+  ```ts
   // notifier.ts
   export type NotifyKind = 'offline' | 'online' | 'recovery-exhausted';
   export class Notifier { constructor(cfg: HubConfig['notifications'], persist: JsonStore); notify(kind: NotifyKind, text: string): Promise<void>; registerPush(deviceToken: string, apnsToken: string): Promise<void>; }
@@ -443,16 +492,16 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `GET /v1/schedules`, `PUT /v1/schedules/:id` (`Schedule` minus `pausedUntil`) → `setProgram` mapping; zones in controller order.
   - `GET/PUT /v1/settings` (`Settings`)
   - `GET /v1/zones/:id/photo`, `PUT /v1/zones/:id/photo` (JPEG ≤ 2 MB, stored under `dataDir/photos/<id>.jpg`)
-  - `POST /v1/pair {code, deviceName}` → `{token}`; `GET /v1/devices`, `DELETE /v1/devices/:token`, `PUT /v1/devices/:token/push {apnsToken}`
-  - `GET /v1/ws` → WebSocket; messages `{type:'state', state}` on every store change, `{type:'event', name, payload}` for `command|offline|online|power-cycle|recovery-exhausted`.
+  - `POST /v1/pair {code, deviceName}` → `{token}`; `POST /v1/pairing/start` → `{code, expiresAt}`; `GET /v1/devices`, `DELETE /v1/devices/:token`, `PUT /v1/devices/:token/push {apnsToken}`
+  - `GET /v1/ws` → WebSocket. **Browser-compatible auth** (Codex finding 6): no header required; the client's first message must be `{type:'auth', token}` within 2 s, otherwise the socket closes with code 4401 and nothing is sent. After auth: `{type:'state', state}` immediately and on every store change, `{type:'event', name, payload}` for `command|offline|online|power-cycle|recovery-exhausted`.
   - CORS: allow any origin for `GET`; for other methods allow `allowedOrigins` plus `http://<controller host>` (spec §5.1).
 - mDNS: advertise `_rainmaker._tcp` on `apiPort` with TXT `v=1`.
 - Notifier: APNs over HTTP/2 (`node:http2`) with a token-signed JWT when the APNs fields are set; else ntfy (`POST https://ntfy.sh/<topic>`) or Pushover if set; else log. Only fires `offline`/`online` when `settings.notifications.offline` is true.
 - CLI `rainmaker-hub --config path.json` starts a standalone hub and prints the pairing code on first run.
 
-- [ ] **Step 1: Auth tests**: `claim with valid code returns token`, `code expires after 5 min`, `verify false for unknown token`, `revoke`.
+- [ ] **Step 1: Auth tests**: `claim with valid code returns token`, `code expires after 5 min`, `verify false for unknown token`, `revoke`, `startPairing after expiry issues a new code`, `hub start with no devices issues a code and re-issues after 5 min`, `pairing/start route returns a claimable code`.
 - [ ] **Step 2: Route tests** (hub against simulator): `401 without token`, `GET /v1/state includes zones and capabilities`, `run returns 409 with warnings for source app when rain forecast` (stub forecast 80 %), `run with force runs`, `run with source alexa ignores warnings`, `pause then state shows rainDelayUntil`, `PUT schedule updates the simulator program`, `state response never contains the controller password or its md5`, `CORS allows controller origin for POST`, `loadConfig names a missing field`.
-- [ ] **Step 3: WS tests**: `receives state on connect`, `receives state within 100 ms of a store change`, `receives offline event`.
+- [ ] **Step 3: WS tests**: `receives state after auth message`, `closes with 4401 and sends nothing on a bad token`, `closes with 4401 when no auth within 2 s`, `receives state within 100 ms of a store change`, `receives offline event`.
 - [ ] **Step 4: Run** → FAIL. **Step 5: Implement** `hub.ts`, `config.ts` (hand-written checks, no schema lib), `server.ts` on node `http`, `ws` package for WebSocket, `bonjour-service` for mDNS. **Step 6: Run** `npx vitest run packages/hub-core` → PASS.
 - [ ] **Step 7: Manual check**: `npx rainmaker-hub --config examples/hub.config.json` (pointing at a running simulator) → logs "Rainmaker hub listening on 8787" and a pairing code; `curl -H "Authorization: Bearer <token>" localhost:8787/v1/state` returns zones.
 - [ ] **Step 8: Commit** `git commit -m "feat(hub): local API with pairing, WebSocket push, mDNS and notifications"`
@@ -471,10 +520,12 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - **"Sprinklers"** `IrrigationSystem` (Active, ProgramMode, InUse) with one linked `Valve` per zone: `ValveType=IRRIGATION`, `Name=zone.name`, `SetDuration` from `settings.zones[id].voiceSeconds` (default 600) and **written back via `settings.update` when changed in Home**, `RemainingDuration` from `remainingSec`, `Active` set → `commands.runZone(id, SetDuration, 'homekit')`, cleared → `stopZone`.
   - Switches: **"Sprinkler System"** (`setSystemEnabled`), **"Sprinkler Pause"** (on → `pauseAll(now + 32767 h)`, off → `resumeAll`; state reflects `rainDelayUntil !== null`), **"Pause Sprinklers 1 Day"**, **"Pause Sprinklers 1 Week"** (momentary: on → `pauseAll(now + 24 h | 168 h)` then auto-off after 1 s).
   - **"Sprinkler Controller Online"** `ContactSensor`: `CONTACT_DETECTED` when online, `CONTACT_NOT_DETECTED` when offline (for the `homekit-automation` plug path).
+  - **"Rainmaker Pairing"** momentary switch: on → `pairing.startPairing()`, logs the code, auto-off after 1 s.
+- **Failures reach Siri and Alexa** (Codex finding 10): every characteristic `set` handler awaits the `CommandResult`; on `{ok:false}` it throws `new this.api.hap.HapStatusError(HAPStatus.SERVICE_COMMUNICATION_FAILURE)` so HomeKit reports the failure and Alexa says the device isn't responding, and it reverts the characteristic to the store's value.
 - `config.schema.json` mirrors `HubConfig` and includes Homebridge's standard `_bridge` block so the plugin can run as a child bridge.
 
-- [ ] **Step 1: Tests** using a minimal hand-written fake of the Homebridge `API`/`PlatformAccessory`/`Service`/`Characteristic` in `test/fakes.ts` (~80 lines): `creates one valve per zone with the zone name`, `removes valves for zones that disappear` (Review Focus 2), `setting Active runs the zone with the configured duration and source homekit`, `RemainingDuration follows store changes`, `Sprinkler Pause reflects rainDelayUntil`, `Pause 1 Week calls pauseAll with 168 h and turns itself off`, `online sensor follows store online`.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS, 7 tests.
+- [ ] **Step 1: Tests** using a minimal hand-written fake of the Homebridge `API`/`PlatformAccessory`/`Service`/`Characteristic` in `test/fakes.ts` (~80 lines): `creates one valve per zone with the zone name`, `removes valves for zones that disappear` (Review Focus 2), `setting Active runs the zone with the configured duration and source homekit`, `RemainingDuration follows store changes`, `Sprinkler Pause reflects rainDelayUntil`, `Pause 1 Week calls pauseAll with 168 h and turns itself off`, `online sensor follows store online`, `changing SetDuration in Home persists and survives a platform restart` (new platform on the same `SettingsStore` → valve reports the changed value), `a failed command throws HapStatusError and reverts Active` (`commands.runZone` stubbed to `{ok:false, error:'offline'}`), `Pairing switch issues a code`.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement.** **Step 4: Run** → PASS, 10 tests.
 - [ ] **Step 5: Manual check on the owner's Windows PC**: `npm link` the plugin into Homebridge, configure it as a child bridge, open the Home app → "Sprinklers" tile with named zones; "Hey Siri, turn on <zone>" starts water. Record in `docs/guides/voice-test-checklist.md` with pass/fail per phrase (Siri and Alexa columns).
 - [ ] **Step 6: Commit** `git commit -m "feat(homebridge): Rainmaker platform with irrigation valves, pause and system switches"`
 
@@ -505,6 +556,10 @@ git commit -m "feat(hub): serialized controller client with password negotiation
 - [ ] **Step 2: Run** `npm test` → all green. **Step 3: Commit** `git commit -m "docs: hub, Alexa, smart plug and remote access guides"`
 
 ---
+
+## Codex review (2026-10-21)
+
+Ten findings, all folded in: `/jo` fwv-only unauthorized reply (Task 1–2), lossless program round-trip with names (Tasks 1–3, 5), controller-local timestamps (Global, Tasks 1, 3, 6), confirmation predicates and `not-applied` (Task 4), end-to-end 3 s deadline with poll abort and protected confirms (Tasks 2, 4), browser WebSocket auth (Task 8), pairing entry points (Tasks 8–9), durable pause jobs (Task 5), hourly forecast window (Task 6), HomeKit failure propagation and SetDuration persistence (Task 9).
 
 ## Self-review notes
 
