@@ -41,6 +41,21 @@ afterEach(async () => {
 });
 
 describe('RunHistory', () => {
+  it('refresh completes while the poller is running', async () => {
+    const { client, store, persist } = await setup();
+    const poller = new Poller(client, store, { idleIntervalMs: 50, activeIntervalMs: 50 });
+    const history = new RunHistory(client, store, persist);
+    poller.start();
+    try {
+      // Overlapping refreshes plus the poller keep several reads waiting at once: none may be dropped.
+      const results = await Promise.allSettled(Array.from({ length: 5 }, () => history.refresh()));
+      expect(results.filter((r) => r.status === 'rejected')).toEqual([]);
+    } finally {
+      poller.stop();
+    }
+    expect(history.lastRunAt(0)).not.toBeNull();
+  });
+
   it('log end times are converted from controller-local time', async () => {
     const { store, history } = await setup({ tzOffsetSec: -21600 });
     store.patch({ tzOffsetSec: -21600 });

@@ -71,7 +71,7 @@ export class ControllerClient {
   }
 
   async getLog(startLocalSec: number, endLocalSec: number, o: RequestOptions = {}): Promise<LogEntry[] | null> {
-    const reply = await this.submit('poll', o, '/jl', `start=${startLocalSec}&end=${endLocalSec}`);
+    const reply = await this.submit('history', o, '/jl', `start=${startLocalSec}&end=${endLocalSec}`);
     if (reply.status === 404) return null;
     if (!Array.isArray(reply.body)) throw this.rejectedOrMalformed('/jl', reply.body);
     return reply.body as LogEntry[];

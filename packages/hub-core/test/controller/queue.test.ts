@@ -46,6 +46,44 @@ describe('SerialQueue', () => {
     expect(order).toEqual(['A', 'C']);
   });
 
+  it('history is never superseded by polls', async () => {
+    const q = new SerialQueue();
+    const order: string[] = [];
+    const task = (name: string) => async () => {
+      await sleep(10);
+      order.push(name);
+    };
+    const first = q.run('poll', task('P0'));
+    const h = q.run('history', task('H'));
+    const polls = [1, 2, 3, 4].map((i) => q.run('poll', task(`P${i}`)).catch((e: unknown) => e));
+    await expect(h).resolves.toBeUndefined();
+    await first;
+    const results = await Promise.all(polls);
+    expect(results.slice(0, 3).every((r) => r instanceof PollSuperseded)).toBe(true);
+    expect(order).toEqual(['P0', 'H', 'P4']);
+  });
+
+  it('history waits behind commands and confirms, and a command aborts it in flight', async () => {
+    const q = new SerialQueue();
+    const order: string[] = [];
+    let historySignal: AbortSignal | undefined;
+    const blocker = q.run('poll', () => sleep(10));
+    const h = q.run('history', (signal) => {
+      historySignal = signal;
+      order.push('H');
+      return new Promise<void>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+    });
+    q.run('confirm', async () => void order.push('C'));
+    await blocker;
+    await sleep(0);
+    expect(order).toEqual(['C', 'H']);
+    const cmd = q.run('command', async () => void order.push('X'));
+    expect(historySignal?.aborted).toBe(true);
+    await expect(h).rejects.toBeInstanceOf(PollSuperseded);
+    await cmd;
+    expect(order).toEqual(['C', 'H', 'X']);
+  });
+
   it('a failing task does not block the queue', async () => {
     const q = new SerialQueue();
     const bad = q.run('command', async () => {

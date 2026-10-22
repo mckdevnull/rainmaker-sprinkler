@@ -1,4 +1,8 @@
-export type Priority = 'command' | 'confirm' | 'poll';
+/**
+ * 'history' is a one-off read (the run log) that must not be lost to the poller: it waits behind
+ * commands and confirms, is never superseded by polls, and is aborted by a command like a poll.
+ */
+export type Priority = 'command' | 'confirm' | 'history' | 'poll';
 
 export class PollSuperseded extends Error {
   constructor() {
@@ -19,11 +23,12 @@ interface Running {
   readonly controller: AbortController;
 }
 
-const ORDER: readonly Priority[] = ['command', 'confirm', 'poll'];
+const ORDER: readonly Priority[] = ['command', 'confirm', 'history', 'poll'];
+const PREEMPTIBLE: readonly Priority[] = ['history', 'poll'];
 
-/** Runs one task at a time; commands beat confirms beat polls; a new poll replaces a waiting one. */
+/** Runs one task at a time; commands beat confirms beat history beats polls; a new poll replaces a waiting one. */
 export class SerialQueue {
-  private readonly waiting: Record<Priority, Task[]> = { command: [], confirm: [], poll: [] };
+  private readonly waiting: Record<Priority, Task[]> = { command: [], confirm: [], history: [], poll: [] };
   private running: Running | null = null;
   private readonly maxPollBacklog: number;
 
@@ -39,7 +44,7 @@ export class SerialQueue {
     return new Promise<T>((resolve, reject) => {
       if (priority === 'poll') this.supersedeOldestPolls();
       this.waiting[priority].push({ priority, fn, resolve: resolve as (v: unknown) => void, reject });
-      if (priority === 'command' && this.running?.priority === 'poll') {
+      if (priority === 'command' && this.running && PREEMPTIBLE.includes(this.running.priority)) {
         this.running.controller.abort(new PollSuperseded());
       }
       this.pump();
