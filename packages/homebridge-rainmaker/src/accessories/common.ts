@@ -104,8 +104,9 @@ export function switchService(api: API, acc: PlatformAccessory, name: string): S
 }
 
 /**
- * Used when the hub could not start: every control answers with an error instead of
- * quietly accepting writes that nothing would carry out.
+ * Bound to every restored accessory until the hub has started (and for good if it cannot):
+ * every control answers with an error instead of quietly accepting writes that nothing would
+ * carry out. The live handlers replace these once the hub is up.
  */
 export function bindUnavailable(api: API, acc: PlatformAccessory): void {
   const C = api.hap.Characteristic;

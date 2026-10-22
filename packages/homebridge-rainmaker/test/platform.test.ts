@@ -28,12 +28,14 @@ describe('RainmakerPlatform', () => {
         _bridge: { username: '0E:00:00:00:00:01', port: 51830 },
         controller: { baseUrl: 'http://192.0.2.10', password: 'pw' },
         location: {},
+        plug: { type: 'none', host: 'left-over.example' },
         zoneDefaults: [{ zone: 2, voiceSeconds: 300 }],
       },
       '/homebridge',
     );
     expect(cfg.dataDir).toBe('/homebridge/rainmaker');
     expect(cfg.location).toBeNull();
+    expect(cfg.plug).toEqual({ type: 'none' });
     expect(cfg.zoneDefaults).toEqual({ 2: { voiceSeconds: 300 } });
     expect(() => toHubConfig({ controller: cfg.controller, zoneDefaults: [{ zone: 1, voiceSeconds: 0 }] }, '/hb')).toThrow(
       /zoneDefaults\.1\.voiceSeconds/,

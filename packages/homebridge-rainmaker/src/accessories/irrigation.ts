@@ -1,5 +1,5 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
-import { parseVoiceSeconds, type ControllerState, type Zone } from '@rainmaker/hub-core';
+import { parseVoiceSeconds, type CommandResult, type ControllerState, type Zone } from '@rainmaker/hub-core';
 import { MAX_DURATION_SECONDS } from '../constants.js';
 import { hapError, perform, revertSoon, whenOnline, type Part, type PartContext } from './common.js';
 
@@ -145,18 +145,31 @@ export class IrrigationAccessory implements Part {
 
   // ---- system --------------------------------------------------------------------------
 
-  /** Off stops every zone; on has nothing to start (zones start from their valves). */
+  /** On (while idle) runs every zone in controller order for its voice duration; off stops all. */
   private async setSystemActive(value: CharacteristicValue): Promise<void> {
-    const C = this.ctx.api.hap.Characteristic;
+    const { hub, api } = this.ctx;
+    const C = api.hap.Characteristic;
     const revert = () => revertSoon(this.system, C.Active, () => this.systemActive());
-    if (value === C.Active.ACTIVE) {
-      if (this.systemActive() === C.Active.INACTIVE) {
-        this.ctx.log.info('Rainmaker: turn on a zone to start watering');
-        revert();
-      }
+    if (value !== C.Active.ACTIVE) {
+      await perform(this.ctx, 'stop all zones', () => hub.commands.stopAll('homekit'), revert);
       return;
     }
-    await perform(this.ctx, 'stop all zones', () => this.ctx.hub.commands.stopAll('homekit'), revert);
+    if (this.systemActive() === C.Active.ACTIVE) return;
+    await perform(this.ctx, 'run all zones', () => this.runAllZones(), revert);
+  }
+
+  /** One runZone per zone, in order (the firmware queues them); stops at the first failure. */
+  private async runAllZones(): Promise<CommandResult> {
+    const { hub } = this.ctx;
+    const zones = hub.store.get().zones;
+    if (zones.length === 0) return { ok: false, error: 'offline' };
+    let total = 0;
+    for (const zone of zones) {
+      const result = await hub.commands.runZone(zone.id, hub.settings.voiceSeconds(zone.id), 'homekit');
+      if (!result.ok) return result;
+      total += result.confirmedInMs;
+    }
+    return { ok: true, confirmedInMs: total };
   }
 
   private zone(id: number): Zone | undefined {

@@ -21,11 +21,16 @@
     "homebridge": "^1.8.0 || ^2.0.0",
     "node": ">=20"
   },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --external:ws --external:bonjour-service --external:homebridge"
+  },
   "dependencies": {
-    "@rainmaker/hub-core": "*"
+    "bonjour-service": "^1.4.4",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@rainmaker/controller-sim": "*",
+    "@rainmaker/hub-core": "*",
     "homebridge": "^2.4.0"
   }
 }

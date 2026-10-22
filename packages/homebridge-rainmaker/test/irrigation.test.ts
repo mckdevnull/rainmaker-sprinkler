@@ -100,4 +100,57 @@ describe('Sprinklers irrigation system', () => {
     expect(active.value).toBe(C.Active.INACTIVE);
     expect(r.log.error).toHaveBeenCalledWith(expect.stringContaining('offline'));
   });
+
+  it('a write on a cached valve during startup rejects instead of being accepted', async () => {
+    const first = await launch({ sim: { nStations: 2 } });
+    const cached = first.api.registered;
+    await shutdown(first);
+
+    const errors: unknown[] = [];
+    const attempt = async (r: { api: { accessory(n: string): FakeAccessory } }) => {
+      const active = valve(r.api.accessory('Sprinklers'), 0).getCharacteristic(C.Active);
+      errors.push(await active.set(C.Active.ACTIVE).catch((e: unknown) => e));
+      errors.push(await active.get().catch((e: unknown) => e));
+    };
+    const r = await launch({
+      dir: first.dir,
+      cached,
+      sim: { nStations: 2 },
+      duringStartup: async (running, start) => {
+        await attempt(running); // restored, before didFinishLaunching
+        start();
+        await attempt(running); // hub.start() still in flight
+      },
+    });
+    expect(errors).toHaveLength(4);
+    for (const e of errors) expect((e as HapStatusError).hapStatus).toBe(-70402);
+    expect(r.sim.state.stations[0]?.running).toBe(false);
+    // Once started, the live handlers answer.
+    expect(await valve(r.api.accessory('Sprinklers'), 0).getCharacteristic(C.Active).get()).toBe(C.Active.INACTIVE);
+  });
+
+  it('turning on the Sprinklers system runs all zones in order', async () => {
+    const r = await launch({ sim: { nStations: 3 }, config: { zoneDefaults: [{ zone: 1, voiceSeconds: 120 }] } });
+    const runZone = vi.spyOn(r.platform.hub!.commands, 'runZone');
+    const system = r.api.accessory('Sprinklers').getService(S.IrrigationSystem)!;
+    await system.getCharacteristic(C.Active).set(C.Active.ACTIVE);
+    expect(runZone.mock.calls).toEqual([
+      [0, 600, 'homekit'],
+      [1, 120, 'homekit'],
+      [2, 600, 'homekit'],
+    ]);
+    expect(system.value(C.Active)).toBe(C.Active.ACTIVE);
+  });
+
+  it('turning off the Sprinklers system stops all', async () => {
+    const r = await launch();
+    const hub = r.platform.hub!;
+    const stopAll = vi.spyOn(hub.commands, 'stopAll');
+    await valve(r.api.accessory('Sprinklers'), 0).getCharacteristic(C.Active).set(C.Active.ACTIVE);
+    const system = r.api.accessory('Sprinklers').getService(S.IrrigationSystem)!;
+    await system.getCharacteristic(C.Active).set(C.Active.INACTIVE);
+    expect(stopAll).toHaveBeenCalledWith('homekit');
+    expect(hub.store.get().zones.every((z) => z.status === 'idle')).toBe(true);
+    expect(system.value(C.Active)).toBe(C.Active.INACTIVE);
+  });
 });

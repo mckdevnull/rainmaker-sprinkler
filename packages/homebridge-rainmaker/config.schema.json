@@ -42,7 +42,7 @@
         "title": "App API port",
         "type": "integer",
         "default": 8787,
-        "minimum": 0,
+        "minimum": 1,
         "maximum": 65535,
         "description": "Port the Rainmaker app connects to on this computer."
       },

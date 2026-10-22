@@ -29,7 +29,14 @@ export async function tempDir(): Promise<string> {
 
 /** A platform on a fake Homebridge API, launched against a fresh simulator. */
 export async function launch(
-  opts: { config?: Record<string, unknown>; cached?: FakeAccessory[]; dir?: string; sim?: Partial<SimOptions> } = {},
+  opts: {
+    config?: Record<string, unknown>;
+    cached?: FakeAccessory[];
+    dir?: string;
+    sim?: Partial<SimOptions>;
+    /** Runs after cached accessories are restored, before 'didFinishLaunching'; gets the start promise trigger. */
+    duringStartup?: (r: Running, launch: () => void) => Promise<void>;
+  } = {},
 ): Promise<Running> {
   const sim = createSimulator({ password: PASSWORD, passwordMode: 'plain', responseDelayMs: 2, ...opts.sim });
   const { baseUrl } = await sim.listen(0);
@@ -54,7 +61,8 @@ export async function launch(
     api.registered = [...api.registered, acc];
     platform.configureAccessory(acc as unknown as PlatformAccessory);
   }
-  api.emit('didFinishLaunching');
+  if (opts.duringStartup) await opts.duringStartup(r, () => api.emit('didFinishLaunching'));
+  else api.emit('didFinishLaunching');
   await platform.ready();
   return r;
 }

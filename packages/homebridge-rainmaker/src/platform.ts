@@ -81,6 +81,8 @@ export class RainmakerPlatform implements DynamicPlatformPlugin {
 
   /** Homebridge hands back each accessory restored from its cache. */
   configureAccessory(acc: PlatformAccessory): void {
+    // Until the hub has started and live handlers replace these, writes must fail, not succeed.
+    bindUnavailable(this.api, acc);
     this.cached.set(acc.UUID, acc);
     this.registered.add(acc.UUID);
   }
@@ -117,9 +119,12 @@ export class RainmakerPlatform implements DynamicPlatformPlugin {
     this.publish(hub);
   }
 
-  /** Cached accessories stay (keeping rooms and automations) but every control reports an error. */
+  /**
+   * Cached accessories stay (keeping rooms and automations) and keep the error handlers bound in
+   * `configureAccessory`: every control reports an error.
+   */
   private markUnavailable(): void {
-    for (const acc of this.cached.values()) bindUnavailable(this.api, acc);
+    this.log.error('Rainmaker accessories will report errors until the hub starts.');
   }
 
   private publish(hub: Hub): void {
@@ -164,8 +169,9 @@ export class RainmakerPlatform implements DynamicPlatformPlugin {
     const onChange = (s: ControllerState) => {
       for (const part of this.parts) part.update(s);
     };
-    const onCode = ({ code }: { code: string; expiresAt: number }) => {
-      this.log.info(`Rainmaker pairing code: ${code} (enter it in the Rainmaker app within 5 minutes)`);
+    const onCode = ({ code, expiresAt }: { code: string; expiresAt: number }) => {
+      const minutes = Math.max(1, Math.round((expiresAt - this.clock()) / 60_000));
+      this.log.info(`Rainmaker pairing code: ${code} (enter it in the Rainmaker app within ${minutes} minutes)`);
     };
     hub.store.on('change', onChange);
     hub.pairing.on('code', onCode);

@@ -32,12 +32,14 @@ first so the new accessories appear.
 | 6 | "Turn on pause sprinklers 1 week" | Rain delay of 168 h; switch turns itself off after ~1 s | | | |
 | 7 | "Turn off the sprinkler system" | Controller disabled (no scheduled watering) | | | |
 | 8 | "Turn on the sprinkler system" | Controller enabled again | | | |
+| 9 | "Turn on the sprinklers" | Every zone runs in turn, each for its voice duration (the controller queues them) | | | |
+| 10 | "Turn off the sprinklers" | All zones stop | | | |
 
 **Failure check** (unplug the controller, or block it on the network, then wait about 20 s)
 
 | # | Phrase | Expected result | Siri (pass/fail) | Alexa (pass/fail) | Notes |
 |---|--------|-----------------|------------------|-------------------|-------|
-| 9 | "Turn on &lt;zone&gt;" while the controller is offline | Siri reports a problem; Alexa says the device is not responding; "Sprinkler Controller Online" shows open | | | |
+| 11 | "Turn on &lt;zone&gt;" while the controller is offline | Siri reports a problem; Alexa says the device is not responding; "Sprinkler Controller Online" shows open | | | |
 
 **Result**
 
