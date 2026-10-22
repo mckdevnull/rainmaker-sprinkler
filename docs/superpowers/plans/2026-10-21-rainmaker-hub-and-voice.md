@@ -498,7 +498,7 @@ git commit -m "feat(hub): serialized controller client with password negotiation
   - `GET /v1/schedules`, `PUT /v1/schedules/:id` (`Schedule` minus `pausedUntil`) → `setProgram` mapping; zones in controller order.
   - `GET/PUT /v1/settings` (`Settings`)
   - `GET /v1/zones/:id/photo`, `PUT /v1/zones/:id/photo` (JPEG ≤ 2 MB, stored under `dataDir/photos/<id>.jpg`)
-  - `POST /v1/pair {code, deviceName}` → `{token}`; `POST /v1/pairing/start` → `{code, expiresAt}`; `GET /v1/devices`, `DELETE /v1/devices/:token`, `PUT /v1/devices/:token/push {apnsToken}`
+  - `POST /v1/pair {code, deviceName}` → `{token, id}`; `POST /v1/pairing/start` → `{code, expiresAt}`; `GET /v1/devices` → `[{id, name, createdAt}]` (id = SHA-256 of the token, hex); `DELETE /v1/devices/:id`, `PUT /v1/devices/:id/push {apnsToken}`. Bearer tokens never appear in URLs (Ruling M).
   - `GET /v1/ws` → WebSocket. **Browser-compatible auth** (Codex finding 6): no header required; the client's first message must be `{type:'auth', token}` within 2 s, otherwise the socket closes with code 4401 and nothing is sent. After auth: `{type:'state', state}` immediately and on every store change, `{type:'event', name, payload}` for `command|offline|online|power-cycle|recovery-exhausted`.
   - CORS: allow any origin for `GET`; for other methods allow `allowedOrigins` plus `http://<controller host>` (spec §5.1).
 - mDNS: advertise `_rainmaker._tcp` on `apiPort` with TXT `v=1`.
